@@ -229,7 +229,7 @@ supply_chain_recommendations = {
 }
 
 
-def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective):
+def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role):
     # Convert 5S levels to readable text
     s_txt = "\n".join([f"- {dim}: Level {level}" for dim, level in five_s_levels.items()])
     lce_txt = "\n".join([f"- {stage}" for stage in lce_stages]) if lce_stages else "None selected"
@@ -243,6 +243,10 @@ You are an expert in {system_type} manufacturing systems for the {industry} indu
 
 The company's stated objective is:
 {objective}
+
+The user's role is: 
+
+{user_role}
 
 Current LCE stages/actions:
 {lce_txt}
@@ -268,42 +272,54 @@ Please respond in the following format:
 
 
 
-
-
 # ========== Streamlit App Layout ==========
 
-
-
-# --- Step 1: Define Objective ---
+# --- Step 1: Define Objective, Industry, and Role ---
 st.header("1. Define Your Manufacturing Objective")
-objective = st.text_input("Describe your main goal (e.g., launch new product, adopt new technology, expand facility):", key="objective", value="Automate assembly of micro-machine cells.")
-industry = st.selectbox("Select your industry:", ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"], key="industry")
+objective = st.text_input( "Describe your main goal (e.g., launch new product, adopt new technology, expand facility):", value=st.session_state.get("objective", "Automate assembly of micro-machine cells."), key="objective")
+st.session_state["objective"] = objective
+industry = st.selectbox( "Select your industry:", ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"], index=st.session_state.get("industry_idx", 0), key="industry")
+st.session_state["industry"] = industry
+st.session_state["industry_idx"] = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"].index(industry)
+role_options = ["Design Engineer", "Process Engineer", "Manufacturing Engineer", "Safety Supervisor","Sustainability Manager", "Supply Chain Analyst", "Manager/Decision Maker", "Other"]
+role_selected = st.selectbox("Select your role:", role_options,index=st.session_state.get("role_idx", 2), key="user_role")
+if role_selected == "Other":
+    custom_role = st.text_input(
+        "Please specify your role:",
+        value=st.session_state.get("custom_role", ""),
+        key="custom_role"
+    )
+    final_role = custom_role if custom_role else "Other"
+    st.session_state["custom_role"] = custom_role
+else:
+    final_role = role_selected
+st.session_state["user_role"] = final_role
+st.session_state["role_idx"] = role_options.index(role_selected)
 
 # --- Step 2: Select Manufacturing System Type ---
 st.header("2. Select Manufacturing System Type")
-system_type = st.radio(
-    "Choose a system type:",
-    ["Product Transfer", "Technology Transfer", "Facility Design"], key="system_type"
-)
+system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
+system_type = st.radio("Choose a system type:", index=st.session_state.get("system_type_idx", 0), key="system_type")
+st.session_state["system_type"] = system_type
+st.session_state["system_type_idx"] = system_types.index(system_type)
 st.markdown(f"**Selected system type:** {system_type}")
-# Reset LCE checkboxes if the system type changes
-if "last_system_type" not in st.session_state:
-    st.session_state["last_system_type"] = system_type
-elif st.session_state["last_system_type"] != system_type:
-    # Uncheck all LCE checkboxes
-    for act in sum(lce_actions_taxonomy.values(), []):
-        key = f"lce_{act}"
-        if key in st.session_state:
-            st.session_state[key] = False
-    st.session_state["last_system_type"] = system_type
-# --- Step 3: Select LCE Stage Activities (Checkboxes) ---
+
+# --- Step 3: Select LCE Stage Activities (Checkboxes, persistent per system type) ---
 st.header("3. Select Relevant LCE Stages/Actions")
+if "lce_checked" not in st.session_state:
+    st.session_state["lce_checked"] = {k: [] for k in lce_actions_taxonomy.keys()}
 lce_actions = lce_actions_taxonomy[system_type]
+checked_actions = st.session_state["lce_checked"][system_type]
 selected_stages = []
 for action in lce_actions:
-    checked = st.checkbox(action, key=f"lce_{action}")
+    checked = st.checkbox(
+        action,
+        key=f"lce_{system_type}_{action}",  
+        value=action in checked_actions
+    )
     if checked:
         selected_stages.append(action)
+st.session_state["lce_checked"][system_type] = selected_stages
 st.session_state["selected_stages"] = selected_stages
 
 # --- Step 4: 5S Maturity Assessment (Radio Buttons, not Checkboxes) ---
@@ -341,8 +357,6 @@ if st.checkbox("Show 5S Profile Radar Chart"):
     })
     radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0,4])
     st.plotly_chart(radar_fig, use_container_width=True)
-
-
 
 def parse_stage_views(llm_response):
     stage_pattern = re.compile(
@@ -386,6 +400,12 @@ def build_supply_chain_activity_plantuml_with_views(
         "BackgroundColor<<EoL>> #F2F2D5",
         "}"
     ]
+        # --- SWIMLANE 5S PROFILE ---
+    code.append('partition "5S Profile" {')
+    for s, lvl in five_s_levels.items():
+        code.append(f'  :{s} Level: {lvl};')
+    code.append('}')
+    
     code.append(f"note right\nSystem Type: {system_type}\nend note")
     stage_map = [
         ("Ideation", "Ideation"),
@@ -488,7 +508,7 @@ client = OpenAI(
 # --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
 if st.button("Generate Plan and Recommendations"):
     # 1. Get the PLAN from LLM
-    prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective)
+    prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role)
     with st.spinner("Consulting LLM for plan and recommendations..."):
         plan_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
@@ -535,10 +555,6 @@ if st.button("Generate Plan and Recommendations"):
         stage_views=stage_views
     )
     st.session_state["plantuml_code"] = plantuml_code
-
-
-
-
 
     plantuml_url_code = plantuml_encode(plantuml_code)
     plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
