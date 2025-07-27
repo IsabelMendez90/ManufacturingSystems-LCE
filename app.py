@@ -9,6 +9,7 @@ import re
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
 st.set_page_config(page_title="LCE + 5S Decision Support Tool", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
+st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 # ----- 5S Taxonomy with Technologies -----
 five_s_taxonomy = {
     "Social": [
@@ -277,9 +278,7 @@ Please respond in the following format:
 # --- Step 1: Define Objective, Industry, and Role ---
 st.header("1. Define Your Manufacturing Objective")
 objective = st.text_input( "Describe your main goal (e.g., launch new product, adopt new technology, expand facility):", value=st.session_state.get("objective", "Automate assembly of micro-machine cells."), key="objective")
-st.session_state["objective"] = objective
 industry = st.selectbox( "Select your industry:", ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"], index=st.session_state.get("industry_idx", 0), key="industry")
-st.session_state["industry"] = industry
 st.session_state["industry_idx"] = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"].index(industry)
 role_options = ["Design Engineer", "Process Engineer", "Manufacturing Engineer", "Safety Supervisor","Sustainability Manager", "Supply Chain Analyst", "Manager/Decision Maker", "Other"]
 role_selected = st.selectbox("Select your role:", role_options,index=st.session_state.get("role_idx", 2), key="user_role")
@@ -293,14 +292,12 @@ if role_selected == "Other":
     st.session_state["custom_role"] = custom_role
 else:
     final_role = role_selected
-st.session_state["user_role"] = final_role
 st.session_state["role_idx"] = role_options.index(role_selected)
 
 # --- Step 2: Select Manufacturing System Type ---
 st.header("2. Select Manufacturing System Type")
 system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
 system_type = st.radio("Choose a system type:", index=st.session_state.get("system_type_idx", 0), key="system_type")
-st.session_state["system_type"] = system_type
 st.session_state["system_type_idx"] = system_types.index(system_type)
 st.markdown(f"**Selected system type:** {system_type}")
 
@@ -405,7 +402,7 @@ def build_supply_chain_activity_plantuml_with_views(
     for s, lvl in five_s_levels.items():
         code.append(f'  :{s} Level: {lvl};')
     code.append('}')
-    
+
     code.append(f"note right\nSystem Type: {system_type}\nend note")
     stage_map = [
         ("Ideation", "Ideation"),
