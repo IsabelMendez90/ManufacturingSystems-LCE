@@ -546,10 +546,7 @@ if st.button("Generate Plan and Recommendations"):
     plantuml_url_code = plantuml_encode(plantuml_code)
     plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
 
-    st.markdown("**URL PlantUML (haz clic para abrir y probar):**")
-    st.write(plantuml_svg_url)
     st.markdown(f"[Abrir diagrama en nueva pestaña]({plantuml_svg_url})")
-    st.write(f"Longitud del URL: {len(plantuml_svg_url)} caracteres")
 
     # Mostrar el diagrama SVG en la app
     st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
