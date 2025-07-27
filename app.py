@@ -453,25 +453,28 @@ client = OpenAI(
 def extract_expected_5s_levels(text, five_s_list, fallback=None):
     """
     Extracts expected 5S levels from free text using robust pattern matching.
-    Returns a dict: {dimension: int level}
+    Returns a dict: {dimension: int level} — values always clamped to [0, max_level]
     """
     result = {}
+    max_levels = {dim: len(five_s_taxonomy[dim])-1 for dim in five_s_list}  # max level per S
     for dim in five_s_list:
         # Regex: dimension, optional colon, optional "level", optional spaces, digit
-        pattern = rf"{dim}\s*:?\s*(?:[Ll]evel\s*)?(\d)"
+        pattern = rf"{dim}\s*:?\s*(?:[Ll]evel\s*)?(\d+)"
         m = re.search(pattern, text, re.IGNORECASE)
         if m:
-            result[dim] = int(m.group(1))
+            val = int(m.group(1))
         else:
             # Try a more tolerant match: find any digit after the dimension within 20 chars
-            pattern2 = rf"{dim}.{{0,20}}?(\d)"
+            pattern2 = rf"{dim}.{{0,20}}?(\d+)"
             m2 = re.search(pattern2, text, re.IGNORECASE)
             if m2:
-                result[dim] = int(m2.group(1))
+                val = int(m2.group(1))
             else:
-                result[dim] = fallback[dim] if fallback and dim in fallback else 0
+                val = fallback[dim] if fallback and dim in fallback else 0
+        # Clamp value to allowed range for each S
+        minval, maxval = 0, max_levels[dim]
+        result[dim] = max(min(val, maxval), minval)
     return result
-
 
 st.markdown("""
     <style>
@@ -687,26 +690,29 @@ if st.session_state["chat_history"]:
         elif entry["role"] == "assistant":
             st.markdown(f"**Assistant:** {entry['content']}")
 
+def to_latin1(text):
+    """Convert string to latin1, replacing non-latin1 chars with closest ASCII or ?"""
+    if not isinstance(text, str):
+        text = str(text)
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
+
 def generate_pdf_report():
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-
-    # --- Title ---
-    pdf.cell(200, 10, "LCE + 5S Manufacturing Decision Support Report", ln=True, align="C")
-
-    # --- User Selections ---
+    pdf.cell(200, 10, to_latin1("LCE + 5S Manufacturing Decision Support Report"), ln=True, align="C")
     pdf.ln(8)
     pdf.set_font("Arial", "B", size=12)
-    pdf.cell(0, 10, "User Inputs", ln=True)
+    pdf.cell(0, 10, to_latin1("User Inputs"), ln=True)
     pdf.set_font("Arial", size=12)
-    pdf.cell(0, 8, f"Objective: {st.session_state.get('objective', '')}", ln=True)
-    pdf.cell(0, 8, f"Industry: {st.session_state.get('industry', '')}", ln=True)
-    pdf.cell(0, 8, f"Role: {st.session_state.get('custom_role', st.session_state.get('user_role', ''))}", ln=True)
-    pdf.cell(0, 8, f"System Type: {st.session_state.get('system_type', '')}", ln=True)
-    pdf.multi_cell(0, 8, f"LCE Stages: {', '.join(st.session_state.get('selected_stages', [])) or 'None'}")
+    pdf.cell(0, 8, to_latin1(f"Objective: {st.session_state.get('objective', '')}"), ln=True)
+    pdf.cell(0, 8, to_latin1(f"Industry: {st.session_state.get('industry', '')}"), ln=True)
+    pdf.cell(0, 8, to_latin1(f"Role: {st.session_state.get('custom_role', st.session_state.get('user_role', ''))}"), ln=True)
+    pdf.cell(0, 8, to_latin1(f"System Type: {st.session_state.get('system_type', '')}"), ln=True)
+    pdf.multi_cell(0, 8, to_latin1(f"LCE Stages: {', '.join(st.session_state.get('selected_stages', [])) or 'None'}"))
     five_s_levels = st.session_state.get("five_s_levels", {})
-    pdf.multi_cell(0, 8, f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}")
+    pdf.multi_cell(0, 8, to_latin1(f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}"))
 
     # --- PlantUML Diagram ---
     plantuml_code = st.session_state.get("plantuml_code", None)
