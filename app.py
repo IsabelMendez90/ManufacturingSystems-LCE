@@ -550,10 +550,7 @@ if st.button("Generate Plan and Recommendations"):
         views_response = stage_views_completion.choices[0].message.content
         stage_views = parse_stage_views(views_response)
 
-    # 3. Show Plan/Recommendations
-    st.header("5. Supply Chain Configuration & Action Plan")
-    st.markdown("**Supply Chain Strategy:**")
-    st.info(st.session_state["supply_chain_section"] or "No tailored supply chain plan was generated.")
+
 
     # 4. Generate and show the PlantUML diagram
     plantuml_code = build_supply_chain_activity_plantuml_with_views(
@@ -564,13 +561,6 @@ if st.button("Generate Plan and Recommendations"):
     )
     st.session_state["plantuml_code"] = plantuml_code
 
-    plantuml_url_code = plantuml_encode(plantuml_code)
-    plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
-
-    st.markdown(f"[Abrir diagrama en nueva pestaña]({plantuml_svg_url})")
-
-    # Mostrar el diagrama SVG en la app
-    st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
 
 # Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
@@ -582,7 +572,7 @@ if "supply_chain_section" in st.session_state:
         plantuml_code = st.session_state["plantuml_code"]
         plantuml_url_code = plantuml_encode(plantuml_code)
         plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
-        st.markdown(f"[Abrir diagrama en nueva pestaña]({plantuml_svg_url})")
+        st.markdown(f"[Open in new window]({plantuml_svg_url})")
         st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
 # --- Step 6 if previous responses exist in session_state
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
@@ -693,9 +683,11 @@ def generate_pdf_report():
     
     # Save PDF to buffer
     buf = BytesIO()
-    pdf.output(buf)
+    pdf.output(buf, 'S').encode('latin1')
+    buf.write(pdf.output(dest='S').encode('latin1'))
     buf.seek(0)
     return buf
+
 pdf_buf = generate_pdf_report()
 # Generate filename with timestamp
 timestamp = datetime.now().strftime("%m-%d-%y_%H%M")
