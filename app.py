@@ -539,27 +539,34 @@ def extract_expected_5s_levels(text, five_s_list, fallback=None):
                 result[dim] = fallback[dim] if fallback and dim in fallback else 0
     return result
 
-# Add this right before your st.button for plan generation:
-st.markdown("""
-    <style>
-    div.stButton > button:first-child {
-        background-color: #2ecc40 !important;
-        color: white !important;
-        font-size: 1.3em !important;
-        padding: 1.1em 2.2em !important;
-        border-radius: 10px !important;
-        font-weight: bold !important;
-        margin-top: 1.2em !important;
-        margin-bottom: 1em !important;
-        transition: 0.2s;
-    }
-    div.stButton > button:first-child:hover {
-        background-color: #27ae60 !important;
-        color: #f6f6f6 !important;
-        box-shadow: 0 0 0 2px #97e6b0;
-    }
-    </style>
-""", unsafe_allow_html=True)
+
+#  green 
+custom_green = "#00785D"
+
+button_html = f"""
+<style>
+.big-green-btn {{
+    background-color: {custom_green};
+    color: white;
+    padding: 24px 0;
+    width: 100%;
+    border: none;
+    border-radius: 15px;
+    font-size: 1.35rem;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 18px;
+    margin-bottom: 18px;
+    transition: background 0.2s;
+}}
+.big-green-btn:hover {{
+    background-color: #009874;
+}}
+</style>
+<form action="" method="post">
+    <button class="big-green-btn" type="submit" name="generate">Generate Plan and Recommendations</button>
+</form>
+"""
 
 #  --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
 if st.button("Generate Plan and Recommendations"):
