@@ -517,7 +517,51 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=API_KEY)
 
-# --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
+def extract_expected_5s_levels(text, five_s_list, fallback=None):
+    """
+    Extracts expected 5S levels from free text using robust pattern matching.
+    Returns a dict: {dimension: int level}
+    """
+    result = {}
+    for dim in five_s_list:
+        # Regex: dimension, optional colon, optional "level", optional spaces, digit
+        pattern = rf"{dim}\s*:?\s*(?:[Ll]evel\s*)?(\d)"
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            result[dim] = int(m.group(1))
+        else:
+            # Try a more tolerant match: find any digit after the dimension within 20 chars
+            pattern2 = rf"{dim}.{{0,20}}?(\d)"
+            m2 = re.search(pattern2, text, re.IGNORECASE)
+            if m2:
+                result[dim] = int(m2.group(1))
+            else:
+                result[dim] = fallback[dim] if fallback and dim in fallback else 0
+    return result
+
+# Add this right before your st.button for plan generation:
+st.markdown("""
+    <style>
+    div.stButton > button:first-child {
+        background-color: #2ecc40 !important;
+        color: white !important;
+        font-size: 1.3em !important;
+        padding: 1.1em 2.2em !important;
+        border-radius: 10px !important;
+        font-weight: bold !important;
+        margin-top: 1.2em !important;
+        margin-bottom: 1em !important;
+        transition: 0.2s;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #27ae60 !important;
+        color: #f6f6f6 !important;
+        box-shadow: 0 0 0 2px #97e6b0;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+#  --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
 if st.button("Generate Plan and Recommendations"):
     # 1. Get the PLAN from LLM
     prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role)
@@ -544,16 +588,15 @@ if st.button("Generate Plan and Recommendations"):
         exp5s_match = re.search(r"\[Expected 5S Maturity\](.*)", llm_response, re.DOTALL)
         if exp5s_match:
             exp5s_str = exp5s_match.group(1)
-            # Extract each S and its level (robust for flexible LLM output)
-            expected_5s = {}
-            for dim in five_s_taxonomy:
-                pattern = rf"{dim}\s*:\s*(\d)"
-                m = re.search(pattern, exp5s_str, re.IGNORECASE)
-                expected_5s[dim] = int(m.group(1)) if m else five_s_levels[dim]  # fallback: current level
+            expected_5s = extract_expected_5s_levels(
+                exp5s_str,
+                list(five_s_taxonomy.keys()),
+                fallback=five_s_levels
+            )
             st.session_state["expected_5s"] = expected_5s
         else:
-            # fallback to current levels if not found
             st.session_state["expected_5s"] = five_s_levels.copy()
+
 
     # 2. Get the STAGE VIEWS from LLM
     stage_views_prompt = build_stage_views_prompt(selected_stages)
