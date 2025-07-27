@@ -540,33 +540,25 @@ def extract_expected_5s_levels(text, five_s_list, fallback=None):
     return result
 
 
-#  green 
-custom_green = "#00785D"
+st.markdown("""
+    <style>
+    div.stButton > button:first-child {
+        background-color: #00785D;
+        color: white;
+        font-size: 1.3rem;
+        font-weight: bold;
+        padding: 22px 0;
+        width: 100%;
+        border-radius: 15px;
+        margin-top: 18px;
+        margin-bottom: 18px;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #009874;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-button_html = f"""
-<style>
-.big-green-btn {{
-    background-color: {custom_green};
-    color: white;
-    padding: 24px 0;
-    width: 100%;
-    border: none;
-    border-radius: 15px;
-    font-size: 1.35rem;
-    font-weight: bold;
-    cursor: pointer;
-    margin-top: 18px;
-    margin-bottom: 18px;
-    transition: background 0.2s;
-}}
-.big-green-btn:hover {{
-    background-color: #009874;
-}}
-</style>
-<form action="" method="post">
-    <button class="big-green-btn" type="submit" name="generate">Generate Plan and Recommendations</button>
-</form>
-"""
 
 #  --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
 if st.button("Generate Plan and Recommendations"):
