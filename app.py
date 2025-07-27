@@ -713,32 +713,16 @@ def generate_pdf_report():
                 pdf.image(tmp_img.name, x=10, y=pdf.get_y(), w=180)
                 pdf.ln(85)
 
-    # --- Current 5S Radar Chart ---
+    # --- Current 5S Radar Chart (NO image in PDF on Streamlit Cloud) ---
     if five_s_levels:
-        radar_df = pd.DataFrame({
-            "Dimension": list(five_s_levels.keys()),
-            "Level": [five_s_levels[s] for s in five_s_levels]
-        })
-        radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_plot:
-            radar_fig.write_image(tmp_plot.name, width=600, height=400)
-            pdf.cell(0, 10, "Current 5S Profile", ln=True)
-            pdf.image(tmp_plot.name, x=10, y=pdf.get_y(), w=180)
-            pdf.ln(85)
+        pdf.cell(0, 10, "Current 5S Profile: (see radar chart in the web app)", ln=True)
+        pdf.ln(10)
 
-    # --- Expected 5S Radar Chart (AFTER improvements) ---
+    # --- Expected 5S Radar Chart (NO image in PDF on Streamlit Cloud) ---
     expected_5s = st.session_state.get("expected_5s", {})
     if expected_5s and expected_5s != five_s_levels:
-        expected_radar_df = pd.DataFrame({
-            "Dimension": list(expected_5s.keys()),
-            "Level": [expected_5s[s] for s in expected_5s]
-        })
-        expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_plot2:
-            expected_radar_fig.write_image(tmp_plot2.name, width=600, height=400)
-            pdf.cell(0, 10, "Expected 5S After Improvement", ln=True)
-            pdf.image(tmp_plot2.name, x=10, y=pdf.get_y(), w=180)
-            pdf.ln(85)
+        pdf.cell(0, 10, "Expected 5S After Improvement: (see radar chart in the web app)", ln=True)
+        pdf.ln(10)
 
     # --- LLM Results ---
     pdf.ln(6)
@@ -768,6 +752,7 @@ def generate_pdf_report():
     buf.write(pdf.output(dest='S').encode('latin1'))
     buf.seek(0)
     return buf
+
 
 pdf_buf = generate_pdf_report()
 # Generate filename with timestamp
