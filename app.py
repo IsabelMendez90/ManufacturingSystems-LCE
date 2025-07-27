@@ -569,18 +569,27 @@ if st.button("Generate Plan and Recommendations"):
     # Mostrar el diagrama SVG en la app
     st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
 
-    # Always show Step 6 if previous responses exist in session_state
+# Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
-    st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
+    st.header("5. Supply Chain Configuration & Action Plan")
+    st.markdown("**Supply Chain Strategy:**")
+    st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
     
+    if "plantuml_code" in st.session_state:
+        plantuml_code = st.session_state["plantuml_code"]
+        plantuml_url_code = plantuml_encode(plantuml_code)
+        plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
+        st.markdown(f"[Abrir diagrama en nueva pestaña]({plantuml_svg_url})")
+        st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
+# --- Step 6 if previous responses exist in session_state
+    st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
     st.subheader("Supply Chain Configuration & Action Plan")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
-
     st.subheader("Improvement Opportunities & Risks")
     st.info(st.session_state.get("improvement_section", "No improvement opportunities provided."))
-
     st.subheader("Digital/AI Next Steps")
     st.info(st.session_state.get("ai_section", "No digital/AI next steps provided."))
+
 # --- Step 7: Ask the Project LLM Assistant ---
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
