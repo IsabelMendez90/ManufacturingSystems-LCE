@@ -297,7 +297,7 @@ st.session_state["role_idx"] = role_options.index(role_selected)
 # --- Step 2: Select Manufacturing System Type ---
 st.header("2. Select Manufacturing System Type")
 system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
-system_type = st.radio("Choose a system type:", index=st.session_state.get("system_type_idx", 0), key="system_type")
+system_type = st.radio("Choose a system type:", system_types, index=st.session_state.get("system_type_idx", 0), key="system_type")
 st.session_state["system_type_idx"] = system_types.index(system_type)
 st.markdown(f"**Selected system type:** {system_type}")
 
