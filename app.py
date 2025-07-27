@@ -541,9 +541,6 @@ if st.button("Generate Plan and Recommendations"):
             ]
         )
         views_response = stage_views_completion.choices[0].message.content
-        st.markdown("#### DEBUG: Raw LLM Stage Views Response")
-        st.code(views_response)
-
         stage_views = parse_stage_views(views_response, selected_stages)
         st.session_state["stage_views"] = stage_views
 
