@@ -599,7 +599,7 @@ if st.button("Generate Plan and Recommendations"):
 
     # 2. Get the STAGE VIEWS from LLM
     stage_views_prompt = build_stage_views_prompt(selected_stages)
-    with st.spinner("Consulting LLM for detailed stage views..."):
+    with st.spinner("Consulting LLM..."):
         stage_views_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
             messages=[
@@ -624,6 +624,33 @@ if st.button("Generate Plan and Recommendations"):
 # Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
     st.header("5. Supply Chain Configuration & Action Plan")
+    st.markdown(f"**System Type:** {system_type}")
+    st.markdown("**Selected LCE Stage Activities & Engineering Views:**")
+    # Get stage_views either from local variable or session_state (depending how you saved it)
+    stage_views = st.session_state.get("stage_views", {})
+    if selected_stages and stage_views:
+        st.markdown("<ul style='margin-top: 0; margin-bottom: 0;'>", unsafe_allow_html=True)
+        for action in selected_stages:
+            stage, desc = action.split(":", 1)
+            st.markdown(f"<li><b>{stage.strip()}</b>: {desc.strip()}", unsafe_allow_html=True)
+            views = stage_views.get(stage.strip(), {})
+            if views:
+                st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
+                for key, label in [
+                    ("Function", "Function"),
+                    ("Organization", "Organization"),
+                    ("Information", "Information"),
+                    ("Resource", "Resource"),
+                    ("Performance", "Performance")
+                ]:
+                    value = views.get(key, "").strip()
+                    if value:
+                        st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
+                st.markdown("</ul>", unsafe_allow_html=True)
+            st.markdown("</li>", unsafe_allow_html=True)
+        st.markdown("</ul>", unsafe_allow_html=True)
+    else:
+        st.info("No LCE stage activities selected.")
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
     
