@@ -302,22 +302,29 @@ for i, dim in enumerate(five_s_taxonomy):
 st.session_state["five_s_levels"] = five_s_levels
 
 
-def parse_stage_views(llm_response):
-    stage_pattern = re.compile(
-        r"([A-Za-z \-]+)\nEngineering Analysis:\s*Function:\s*(.*?)\nEngineering Synthesis:\s*Organization:\s*(.*?)\n\s*Information:\s*(.*?)\n\s*Resource:\s*(.*?)\nEngineering Evaluation:\s*Performance:\s*(.*?)(?=\n[A-Za-z \-]+\n|$)", 
+def parse_stage_views(llm_response, selected_stages):
+    # Simple stage names for fuzzy matching
+    stage_names = [action.split(":")[0].strip() for action in selected_stages]
+    pattern = re.compile(
+        r"\[(.*?)\]\s*Engineering Analysis:\s*Function:\s*(.*?)\nEngineering Synthesis:\s*Organization:\s*(.*?)\n\s*Information:\s*(.*?)\n\s*Resource:\s*(.*?)\nEngineering Evaluation:\s*Performance:\s*(.*?)(?=\n\[|$)", 
         re.DOTALL
     )
     views_dict = {}
-    for match in stage_pattern.finditer(llm_response):
-        stage = match.group(1).strip()
-        views_dict[stage] = {
-            "Function": match.group(2).strip(),
-            "Organization": match.group(3).strip(),
-            "Information": match.group(4).strip(),
-            "Resource": match.group(5).strip(),
-            "Performance": match.group(6).strip(),
-        }
+    for match in pattern.finditer(llm_response):
+        header = match.group(1).strip()
+        # Try to find matching stage name (startwith for fuzzy match)
+        for stage in stage_names:
+            if header.startswith(stage):
+                views_dict[stage] = {
+                    "Function": match.group(2).strip(),
+                    "Organization": match.group(3).strip(),
+                    "Information": match.group(4).strip(),
+                    "Resource": match.group(5).strip(),
+                    "Performance": match.group(6).strip(),
+                }
+                break
     return views_dict
+
 
 def build_supply_chain_activity_plantuml_with_views(
     system_type,
@@ -534,7 +541,10 @@ if st.button("Generate Plan and Recommendations"):
             ]
         )
         views_response = stage_views_completion.choices[0].message.content
-        stage_views = parse_stage_views(views_response)
+        st.markdown("#### DEBUG: Raw LLM Stage Views Response")
+        st.code(views_response)
+
+        stage_views = parse_stage_views(views_response, selected_stages)
         st.session_state["stage_views"] = stage_views
 
     # 4. Generate and show the PlantUML diagram
