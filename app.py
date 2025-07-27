@@ -15,7 +15,7 @@ import re
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
 st.set_page_config(page_title="LCE + 5S Decision Support Tool", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
-st.markdown("Developed by: Dr. J. Isabel Méndez and Dr. Arturo Molina")
+st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 # ----- 5S Taxonomy with Technologies -----
 five_s_taxonomy = {
     "Social": [
@@ -117,7 +117,7 @@ lce_actions_taxonomy = {
         "Basic Development: Specify/select new manufacturing technology, equipment, and supporting tools.",
         "Advanced Development: Develop process plan, define control documentation, SOPs.",
         "Launching: Set up, test, and ramp-up equipment; optimize production.",
-        "End-of-Life: Retire/adapt equipment; document performance and failures; involve HDTs for lifecycle learning."
+        "End-of-Life: Retire/adapt equipment; document performance and failures; involve digital twins for lifecycle learning."
     ],
     "Facility Design": [
         "Ideation: Specify new product requirements and associated manufacturing processes.",
@@ -640,7 +640,6 @@ if "chat_history" not in st.session_state:
 st.header("7. Ask the Project LLM Assistant")
 st.markdown("""
 Type your questions about this manufacturing system scenario, supply chain, or digital strategy.
-This assistant only answers questions related to your current project and scenario.
 """)
 user_question = st.text_input("Ask the LLM Assistant (project-specific questions only):", key="user_project_chat")
 
