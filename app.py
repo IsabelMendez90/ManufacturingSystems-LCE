@@ -374,17 +374,6 @@ for i, dim in enumerate(five_s_taxonomy):
             for t in techs:
                 st.write(f"- {t}")
 st.session_state["five_s_levels"] = five_s_levels
-# --- Optional: Radar Chart Visualization ---
-if st.checkbox("Show 5S Profile Radar Chart"):
-    st.session_state["show_5s_radar"] = True
-    radar_df = pd.DataFrame({
-        "Dimension": list(five_s_taxonomy.keys()),
-        "Level": [five_s_levels[s] for s in five_s_taxonomy]
-    })
-    radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0,4])
-    st.plotly_chart(radar_fig, use_container_width=True)
-else:
-    st.session_state["show_5s_radar"] = False
 
 
 def parse_stage_views(llm_response):
@@ -589,26 +578,6 @@ if st.button("Generate Plan and Recommendations"):
     )
     st.session_state["plantuml_code"] = plantuml_code
 
-# Current 5S Radar
-st.header("Current 5S Profile")
-radar_df = pd.DataFrame({
-    "Dimension": list(five_s_taxonomy.keys()),
-    "Level": [five_s_levels[s] for s in five_s_taxonomy]
-})
-radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-st.plotly_chart(radar_fig, use_container_width=True, key="current_5s_profile")
-st.session_state["show_5s_radar"] = True
-
-# Expected 5S Radar (AFTER PLAN GENERATED)
-if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five_s_levels:
-    st.header("Expected 5S Profile After Improvements")
-    expected_radar_df = pd.DataFrame({
-        "Dimension": list(five_s_taxonomy.keys()),
-        "Level": [st.session_state["expected_5s"][s] for s in five_s_taxonomy]
-    })
-    expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-    st.plotly_chart(expected_radar_fig, use_container_width=True, key="expected_5s_profile")
-
 
 # Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
@@ -632,6 +601,24 @@ if "supply_chain_section" in st.session_state:
     st.info(st.session_state.get("ai_section", "No digital/AI next steps provided."))
 
 
+# 5S Radar Charts Block (always shown, after Digital/AI Next Steps)
+st.header("Current 5S Profile")
+radar_df = pd.DataFrame({
+    "Dimension": list(five_s_taxonomy.keys()),
+    "Level": [five_s_levels[s] for s in five_s_taxonomy]
+})
+radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
+st.plotly_chart(radar_fig, use_container_width=True, key="current_5s_profile")
+
+# Expected 5S Radar (AFTER PLAN GENERATED)
+if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five_s_levels:
+    st.header("Expected 5S Profile After Improvements")
+    expected_radar_df = pd.DataFrame({
+        "Dimension": list(five_s_taxonomy.keys()),
+        "Level": [st.session_state["expected_5s"][s] for s in five_s_taxonomy]
+    })
+    expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
+    st.plotly_chart(expected_radar_fig, use_container_width=True, key="expected_5s_profile")
 
 
 
