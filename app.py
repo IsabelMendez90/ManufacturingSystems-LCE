@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.io as pio
+import requests
+import tempfile
 from openai import OpenAI
 from fpdf import FPDF
 from io import BytesIO
@@ -359,12 +362,16 @@ for i, dim in enumerate(five_s_taxonomy):
 st.session_state["five_s_levels"] = five_s_levels
 # --- Optional: Radar Chart Visualization ---
 if st.checkbox("Show 5S Profile Radar Chart"):
+    st.session_state["show_5s_radar"] = True
     radar_df = pd.DataFrame({
         "Dimension": list(five_s_taxonomy.keys()),
         "Level": [five_s_levels[s] for s in five_s_taxonomy]
     })
     radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0,4])
     st.plotly_chart(radar_fig, use_container_width=True)
+else:
+    st.session_state["show_5s_radar"] = False
+
 
 def parse_stage_views(llm_response):
     stage_pattern = re.compile(
@@ -386,7 +393,6 @@ def parse_stage_views(llm_response):
 def build_supply_chain_activity_plantuml_with_views(
     system_type,
     lce_stages,
-    five_s_levels,
     stage_views
 ):
     sys_type_color = {
@@ -408,11 +414,6 @@ def build_supply_chain_activity_plantuml_with_views(
         "BackgroundColor<<EoL>> #F2F2D5",
         "}"
     ]
-        # --- SWIMLANE 5S PROFILE ---
-    code.append('partition "5S Profile" {')
-    for s, lvl in five_s_levels.items():
-        code.append(f'  :{s} Level: {lvl};')
-    code.append('}')
 
     code.append(f"note right\nSystem Type: {system_type}\nend note")
     stage_map = [
@@ -556,7 +557,6 @@ if st.button("Generate Plan and Recommendations"):
     plantuml_code = build_supply_chain_activity_plantuml_with_views(
         system_type=system_type,
         lce_stages=selected_stages,
-        five_s_levels=five_s_levels,
         stage_views=stage_views
     )
     st.session_state["plantuml_code"] = plantuml_code
@@ -659,6 +659,35 @@ def generate_pdf_report():
     pdf.multi_cell(0, 8, f"LCE Stages: {', '.join(selected_stages) if selected_stages else 'None'}")
     pdf.multi_cell(0, 8, f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}")
 
+    # --- (NEW) Insert PlantUML diagram image if available ---
+    plantuml_code = st.session_state.get("plantuml_code", None)
+    if plantuml_code:
+        # Build PNG URL from PlantUML
+        plantuml_url_code = plantuml_encode(plantuml_code)
+        plantuml_png_url = f"http://www.plantuml.com/plantuml/png/{plantuml_url_code}"
+
+        # Download image and insert into PDF
+        response = requests.get(plantuml_png_url)
+        if response.status_code == 200:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
+                tmp_img.write(response.content)
+                tmp_img.flush()
+                # You can adjust x, y, w (width) as needed
+                pdf.image(tmp_img.name, x=10, y=pdf.get_y(), w=180)
+                pdf.ln(85)  # Add space below image
+
+    # --- Insert 5S radar chart if generated ---
+    if st.session_state.get("show_5s_radar", False):
+        radar_df = pd.DataFrame({
+            "Dimension": list(five_s_taxonomy.keys()),
+            "Level": [five_s_levels[s] for s in five_s_taxonomy]
+        })
+        radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0,4])
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_plot:
+            radar_fig.write_image(tmp_plot.name, width=600, height=400)
+            pdf.image(tmp_plot.name, x=10, y=pdf.get_y(), w=180)
+            pdf.ln(85)
+
     # --- LLM Results ---
     pdf.ln(6)
     pdf.set_font("Arial", "B", size=12)
@@ -693,7 +722,6 @@ pdf_buf = generate_pdf_report()
 timestamp = datetime.now().strftime("%m-%d-%y_%H%M")
 filename = f"{timestamp}-Report.pdf"
 # --- Download Button ---
-pdf_buf = generate_pdf_report()
 st.download_button(
     label="Download Full Report (PDF)",
     data=pdf_buf,
