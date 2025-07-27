@@ -596,7 +596,7 @@ radar_df = pd.DataFrame({
     "Level": [five_s_levels[s] for s in five_s_taxonomy]
 })
 radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-st.plotly_chart(radar_fig, use_container_width=True)
+st.plotly_chart(radar_fig, use_container_width=True, key="current_5s_profile")
 st.session_state["show_5s_radar"] = True
 
 # Expected 5S Radar (AFTER PLAN GENERATED)
@@ -607,7 +607,7 @@ if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five
         "Level": [st.session_state["expected_5s"][s] for s in five_s_taxonomy]
     })
     expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
-    st.plotly_chart(expected_radar_fig, use_container_width=True)
+    st.plotly_chart(expected_radar_fig, use_container_width=True, key="expected_5s_profile")
 
 
 # Always show Step 5 if plan/results exist in session_state
