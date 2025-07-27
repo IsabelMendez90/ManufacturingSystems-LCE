@@ -297,15 +297,14 @@ st.session_state["role_idx"] = role_options.index(role_selected)
 # --- Step 2: Select Manufacturing System Type ---
 st.header("2. Select Manufacturing System Type")
 system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
-system_type = st.radio("Choose a system type:", system_types, index=st.session_state.get("system_type_idx", 0), key="system_type")
-st.session_state["system_type_idx"] = system_types.index(system_type)
+system_type = st.radio("Choose a system type:", system_types, key="system_type")
 st.markdown(f"**Selected system type:** {system_type}")
 
 # --- Step 3: Select LCE Stage Activities (Checkboxes, global selection) ---
 st.header("3. Select Relevant LCE Stages/Actions")
 lce_global_keys = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life"]
 
-# Si no existe, crea un array global de seleccionados
+
 if "lce_global_checked" not in st.session_state:
     st.session_state["lce_global_checked"] = [False] * len(lce_global_keys)
 
@@ -313,7 +312,7 @@ lce_actions = lce_actions_taxonomy[system_type]
 selected_stages = []
 
 for i, action in enumerate(lce_actions):
-    # extrae el nombre corto ("Ideation", etc.) usando el prefijo antes de ":"
+
     action_key = action.split(":")[0].strip()
     idx = lce_global_keys.index(action_key)
     checked = st.checkbox(
@@ -321,12 +320,11 @@ for i, action in enumerate(lce_actions):
         value=st.session_state["lce_global_checked"][idx],
         key=f"lce_global_{i}"
     )
-    # Actualiza el estado global:
+
     st.session_state["lce_global_checked"][idx] = checked
     if checked:
         selected_stages.append(action)
 
-# Guarda la selección actual (de acciones, ya formateadas para el tipo seleccionado)
 st.session_state["selected_stages"] = selected_stages
 
 # --- Step 4: 5S Maturity Assessment (Radio Buttons, not Checkboxes) ---
