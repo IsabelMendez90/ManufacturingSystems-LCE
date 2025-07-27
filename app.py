@@ -235,7 +235,6 @@ supply_chain_recommendations = {
     ]
 }
 
-
 def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role):
     # Convert 5S levels to readable text
     s_txt = "\n".join([f"- {dim}: Level {level}" for dim, level in five_s_levels.items()])
@@ -244,15 +243,27 @@ def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective
     # Get supply chain recommendations for this system type
     sc_recs = supply_chain_recommendations.get(system_type, [])
     sc_recs_txt = "\n".join([f"- {rec}" for rec in sc_recs])
-    
+
     prompt = f"""
 You are an expert in {system_type} manufacturing systems for the {industry} industry.
+
+IMPORTANT INSTRUCTIONS:
+- Your scope covers: manufacturing system typology, LCE stages, 5S (Social, Sustainable, Sensing, Smart, Safe), and their integration with **supply chain architecture, digitalization, and Industry 5.0**.
+- Only provide answers that are directly related to manufacturing systems, supply chain management, LCE (Lifecycle Engineering), and 5S within this scenario.
+- **Never make up facts or invent data**. If information is not available, say so clearly.
+- Do **not** express personal opinions or preferences.
+- If the user asks questions unrelated to this scenario (e.g., 'how to go to Mars', 'what is your favorite color'), politely reply:  
+  "**I'm sorry, but this digital assistant only provides advice on manufacturing system and supply chain design based on the LCE and 5S framework.**"
+- If the user asks "Who created you?", "Who built you?", "Who developed you?", or any similar question about your creation or origin, always reply:  
+  "**I am a Large Language Model assistant tailored by Dr. Juana Isabel Méndez and Dr. Arturo Molina for strategic guidance in manufacturing systems and supply chain design using LCE and 5S principles.**"
+- Base all recommendations on real industry standards and on the context provided below.
+- Keep your responses concise, precise, and actionable.
+- Never respond to topics outside this scope.
 
 The company's stated objective is:
 {objective}
 
 The user's role is: 
-
 {user_role}
 
 Current LCE stages/actions:
@@ -267,13 +278,16 @@ When designing the supply chain configuration and action plan, use the following
 Please respond in the following format:
 
 [Supply Chain Configuration & Action Plan]
-(Provide a concise supply chain configuration and action plan tailored to the above scenario, integrating LCE, 5S, and supply chain management. Reference/adapt the listed best practices where relevant.)
+(Provide a concise supply chain configuration and action plan tailored to the above scenario, always employ real standards, integrating LCE, 5S, and supply chain management. Reference/adapt the listed best practices where relevant.)
 
 [Improvement Opportunities & Risks]
 (Identify the main improvement opportunities and risks for this configuration, considering the user's objective.)
 
 [Digital/AI Next Steps]
-(Recommend concrete next steps and digital/AI technologies—drawn from each S in the 5S taxonomy—to help progress toward Industry 5.0 and the goal.)
+(Recommend concrete next steps and digital/AI technologies, drawn from each S in the 5S taxonomy cross referenced with the LCE, to help progress toward Industry 5.0 and the goal.)
+
+[Expected 5S Maturity]
+(For each S, suggest the most likely maturity level (0–4) expected after implementing the recommended improvement opportunities and digital next steps. List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)
 """
     return prompt
 
@@ -538,6 +552,20 @@ if st.button("Generate Plan and Recommendations"):
         st.session_state["improvement_section"] = imp_match.group(1).strip() if imp_match else ""
         st.session_state["ai_section"] = ai_match.group(1).strip() if ai_match else ""
 
+        exp5s_match = re.search(r"\[Expected 5S Maturity\](.*)", llm_response, re.DOTALL)
+        if exp5s_match:
+            exp5s_str = exp5s_match.group(1)
+            # Extract each S and its level (robust for flexible LLM output)
+            expected_5s = {}
+            for dim in five_s_taxonomy:
+                pattern = rf"{dim}\s*:\s*(\d)"
+                m = re.search(pattern, exp5s_str, re.IGNORECASE)
+                expected_5s[dim] = int(m.group(1)) if m else five_s_levels[dim]  # fallback: current level
+            st.session_state["expected_5s"] = expected_5s
+        else:
+            # fallback to current levels if not found
+            st.session_state["expected_5s"] = five_s_levels.copy()
+
     # 2. Get the STAGE VIEWS from LLM
     stage_views_prompt = build_stage_views_prompt(selected_stages)
     with st.spinner("Consulting LLM for detailed stage views..."):
@@ -561,6 +589,26 @@ if st.button("Generate Plan and Recommendations"):
     )
     st.session_state["plantuml_code"] = plantuml_code
 
+# Current 5S Radar
+st.header("Current 5S Profile")
+radar_df = pd.DataFrame({
+    "Dimension": list(five_s_taxonomy.keys()),
+    "Level": [five_s_levels[s] for s in five_s_taxonomy]
+})
+radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
+st.plotly_chart(radar_fig, use_container_width=True)
+st.session_state["show_5s_radar"] = True
+
+# Expected 5S Radar (AFTER PLAN GENERATED)
+if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five_s_levels:
+    st.header("Expected 5S Profile After Improvements")
+    expected_radar_df = pd.DataFrame({
+        "Dimension": list(five_s_taxonomy.keys()),
+        "Level": [st.session_state["expected_5s"][s] for s in five_s_taxonomy]
+    })
+    expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
+    st.plotly_chart(expected_radar_fig, use_container_width=True)
+
 
 # Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
@@ -582,6 +630,10 @@ if "supply_chain_section" in st.session_state:
     st.info(st.session_state.get("improvement_section", "No improvement opportunities provided."))
     st.subheader("Digital/AI Next Steps")
     st.info(st.session_state.get("ai_section", "No digital/AI next steps provided."))
+
+
+
+
 
 # --- Step 7: Ask the Project LLM Assistant ---
 if "chat_history" not in st.session_state:
@@ -652,40 +704,53 @@ def generate_pdf_report():
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, "User Inputs", ln=True)
     pdf.set_font("Arial", size=12)
-    pdf.cell(0, 8, f"Objective: {objective}", ln=True)
-    pdf.cell(0, 8, f"Industry: {industry}", ln=True)
-    pdf.cell(0, 8, f"Role: {final_role}", ln=True)
-    pdf.cell(0, 8, f"System Type: {system_type}", ln=True)
-    pdf.multi_cell(0, 8, f"LCE Stages: {', '.join(selected_stages) if selected_stages else 'None'}")
+    pdf.cell(0, 8, f"Objective: {st.session_state.get('objective', '')}", ln=True)
+    pdf.cell(0, 8, f"Industry: {st.session_state.get('industry', '')}", ln=True)
+    pdf.cell(0, 8, f"Role: {st.session_state.get('custom_role', st.session_state.get('user_role', ''))}", ln=True)
+    pdf.cell(0, 8, f"System Type: {st.session_state.get('system_type', '')}", ln=True)
+    pdf.multi_cell(0, 8, f"LCE Stages: {', '.join(st.session_state.get('selected_stages', [])) or 'None'}")
+    five_s_levels = st.session_state.get("five_s_levels", {})
     pdf.multi_cell(0, 8, f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}")
 
-    # --- (NEW) Insert PlantUML diagram image if available ---
+    # --- PlantUML Diagram ---
     plantuml_code = st.session_state.get("plantuml_code", None)
     if plantuml_code:
-        # Build PNG URL from PlantUML
         plantuml_url_code = plantuml_encode(plantuml_code)
         plantuml_png_url = f"http://www.plantuml.com/plantuml/png/{plantuml_url_code}"
-
-        # Download image and insert into PDF
         response = requests.get(plantuml_png_url)
         if response.status_code == 200:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
                 tmp_img.write(response.content)
                 tmp_img.flush()
-                # You can adjust x, y, w (width) as needed
+                pdf.cell(0, 10, "Supply Chain Activity Diagram", ln=True)
                 pdf.image(tmp_img.name, x=10, y=pdf.get_y(), w=180)
-                pdf.ln(85)  # Add space below image
+                pdf.ln(85)
 
-    # --- Insert 5S radar chart if generated ---
-    if st.session_state.get("show_5s_radar", False):
+    # --- Current 5S Radar Chart ---
+    if five_s_levels:
         radar_df = pd.DataFrame({
-            "Dimension": list(five_s_taxonomy.keys()),
-            "Level": [five_s_levels[s] for s in five_s_taxonomy]
+            "Dimension": list(five_s_levels.keys()),
+            "Level": [five_s_levels[s] for s in five_s_levels]
         })
-        radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0,4])
+        radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_plot:
             radar_fig.write_image(tmp_plot.name, width=600, height=400)
+            pdf.cell(0, 10, "Current 5S Profile", ln=True)
             pdf.image(tmp_plot.name, x=10, y=pdf.get_y(), w=180)
+            pdf.ln(85)
+
+    # --- Expected 5S Radar Chart (AFTER improvements) ---
+    expected_5s = st.session_state.get("expected_5s", {})
+    if expected_5s and expected_5s != five_s_levels:
+        expected_radar_df = pd.DataFrame({
+            "Dimension": list(expected_5s.keys()),
+            "Level": [expected_5s[s] for s in expected_5s]
+        })
+        expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_plot2:
+            expected_radar_fig.write_image(tmp_plot2.name, width=600, height=400)
+            pdf.cell(0, 10, "Expected 5S After Improvement", ln=True)
+            pdf.image(tmp_plot2.name, x=10, y=pdf.get_y(), w=180)
             pdf.ln(85)
 
     # --- LLM Results ---
@@ -709,8 +774,8 @@ def generate_pdf_report():
             pdf.set_font("Arial", size=12)
         elif entry["role"] == "assistant":
             pdf.multi_cell(0, 8, f"Assistant: {entry['content']}")
-    
-    # Save PDF to buffer
+
+    # --- Save PDF to buffer ---
     buf = BytesIO()
     pdf.output(buf, 'S').encode('latin1')
     buf.write(pdf.output(dest='S').encode('latin1'))
