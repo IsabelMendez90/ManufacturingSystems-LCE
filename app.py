@@ -19,116 +19,42 @@ st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 # ----- 5S Taxonomy with Technologies -----
 five_s_taxonomy = {
     "Social": [
-        {
-            "desc": "No integration of social factors; minimal worker well-being consideration.",
-            "tech": []
-        },
-        {
-            "desc": "Compliance with basic labor laws and ergonomic guidelines.",
-            "tech": ["Ergonomic checklists", "Manual safety reporting"]
-        },
-        {
-            "desc": "Workforce development and participatory work systems; inclusion programs.",
-            "tech": ["LMS platforms (Moodle, SAP SuccessFactors)", "Employee engagement apps"]
-        },
-        {
-            "desc": "Worker-centric design of systems; real-time feedback for operator experience and well-being.",
-            "tech": ["Wearables (fatigue monitoring)", "Sentiment analysis tools"]
-        },
-        {
-            "desc": "Fully integrated socio-technical systems with co-creation, leadership development, mental health support, and community engagement metrics.",
-            "tech": ["Digital inclusion dashboards", "Psychological safety analytics", "Collaboration platforms (Miro, Teams with sentiment AI)"]
-        }
+        {"desc": "No integration of social factors; minimal worker well-being consideration.", "tech": []},
+        {"desc": "Compliance with basic labor laws and ergonomic guidelines.", "tech": ["Ergonomic checklists", "Manual safety reporting"]},
+        {"desc": "Workforce development and participatory work systems; inclusion programs.", "tech": ["LMS platforms (Moodle, SAP SuccessFactors)", "Employee engagement apps"]},
+        {"desc": "Worker-centric design of systems; real-time feedback for operator experience and well-being.", "tech": ["Wearables (fatigue monitoring)", "Sentiment analysis tools"]},
+        {"desc": "Fully integrated socio-technical systems with co-creation, leadership development, mental health support, and community engagement metrics.", "tech": ["Digital inclusion dashboards", "Psychological safety analytics", "Collaboration platforms (Miro, Teams with sentiment AI)"]}
     ],
     "Sustainable": [
-        {
-            "desc": "Unsustainable practices with no environmental consideration.",
-            "tech": []
-        },
-        {
-            "desc": "Compliance with basic environmental regulations; manual tracking of resource usage.",
-            "tech": ["Spreadsheets for energy/water tracking", "Basic energy/water meters"]
-        },
-        {
-            "desc": "Implementation of energy-efficient processes; partial material recycling.",
-            "tech": ["ISO 14001 checklists", "Environmental sensors", "Material recycling software"]
-        },
-        {
-            "desc": "Life Cycle Assessment (LCA), closed-loop material systems, carbon monitoring.",
-            "tech": ["OpenLCA", "GaBi", "Carbon calculators", "WMS with recycling metrics"]
-        },
-        {
-            "desc": "Circular economy integration; regenerative systems; AI-enabled sustainability optimization and reporting.",
-            "tech": ["AI for energy optimization", "Blockchain for circular tracking", "ESG analytics platforms"]
-        }
+        {"desc": "Unsustainable practices with no environmental consideration.", "tech": []},
+        {"desc": "Compliance with basic environmental regulations; manual tracking of resource usage.", "tech": ["Spreadsheets for energy/water tracking", "Basic energy/water meters"]},
+        {"desc": "Implementation of energy-efficient processes; partial material recycling.", "tech": ["ISO 14001 checklists", "Environmental sensors", "Material recycling software"]},
+        {"desc": "Life Cycle Assessment (LCA), closed-loop material systems, carbon monitoring.", "tech": ["OpenLCA", "GaBi", "Carbon calculators", "WMS with recycling metrics"]},
+        {"desc": "Circular economy integration; regenerative systems; AI-enabled sustainability optimization and reporting.", "tech": ["AI for energy optimization", "Blockchain for circular tracking", "ESG analytics platforms"]}
     ],
     "Sensing": [
-        {
-            "desc": "Human-based sensing: perception by human operators without sensor support.",
-            "tech": ["Visual inspection", "Manual data logging"]
-        },
-        {
-            "desc": "Basic analog/digital sensors integrated into machines; local display and alarms.",
-            "tech": ["Thermocouples", "Limit switches", "PLC-based indicators"]
-        },
-        {
-            "desc": "Multi-sensor systems with basic processing units; wireless sensor networks (WSN); partial data fusion.",
-            "tech": ["WSNs", "SCADA systems", "LabVIEW", "Basic DAQ systems"]
-        },
-        {
-            "desc": "Integrated sensing-based processes with embedded computing, IoT connectivity, and real-time feedback loops for decision support.",
-            "tech": ["IoT platforms (Azure IoT, AWS IoT)", "Embedded microcontrollers", "OPC-UA protocols"]
-        },
-        {
-            "desc": "Smart sensing systems with AI-enabled smart sensors, IIoT, continuous measurements, edge computing, and adaptive closed-loop control.",
-            "tech": ["Edge AI devices", "IIoT platforms (MindSphere, Lumada)", "TensorFlow Lite", "Sensor fusion algorithms"]
-        }
+        {"desc": "Human-based sensing: perception by human operators without sensor support.", "tech": ["Visual inspection", "Manual data logging"]},
+        {"desc": "Basic analog/digital sensors integrated into machines; local display and alarms.", "tech": ["Thermocouples", "Limit switches", "PLC-based indicators"]},
+        {"desc": "Multi-sensor systems with basic processing units; wireless sensor networks (WSN); partial data fusion.", "tech": ["WSNs", "SCADA systems", "LabVIEW", "Basic DAQ systems"]},
+        {"desc": "Integrated sensing-based processes with embedded computing, IoT connectivity, and real-time feedback loops for decision support.", "tech": ["IoT platforms (Azure IoT, AWS IoT)", "Embedded microcontrollers", "OPC-UA protocols"]},
+        {"desc": "Smart sensing systems with AI-enabled smart sensors, IIoT, continuous measurements, edge computing, and adaptive closed-loop control.", "tech": ["Edge AI devices", "IIoT platforms (MindSphere, Lumada)", "TensorFlow Lite", "Sensor fusion algorithms"]}
     ],
     "Smart": [
-        {
-            "desc": "Manual systems with human control and decision-making.",
-            "tech": ["Paper-based logs", "Manual work instructions"]
-        },
-        {
-            "desc": "Basic control systems using open-loop logic and minimal digital feedback.",
-            "tech": ["Relay logic", "Timers", "Basic HMI"]
-        },
-        {
-            "desc": "Semi-automated systems with closed-loop feedback; basic process logic and automatic correction mechanisms.",
-            "tech": ["PID controllers", "PLCs", "HMI/SCADA integration"]
-        },
-        {
-            "desc": "Advanced automation using intelligent modules and predictive analytics; MES integration.",
-            "tech": ["MES systems (Siemens Opcenter, GE Proficy)", "Predictive maintenance platforms (IBM Maximo, Senseye)"]
-        },
-        {
-            "desc": "Intelligent automation using AI modules, neural networks, IIoT platforms, and big data analytics.",
-            "tech": ["AI/ML platforms (SageMaker, Vertex AI)", "ANN frameworks (Keras, PyTorch)", "Digital twins"]
-        }
+        {"desc": "Manual systems with human control and decision-making.", "tech": ["Paper-based logs", "Manual work instructions"]},
+        {"desc": "Basic control systems using open-loop logic and minimal digital feedback.", "tech": ["Relay logic", "Timers", "Basic HMI"]},
+        {"desc": "Semi-automated systems with closed-loop feedback; basic process logic and automatic correction mechanisms.", "tech": ["PID controllers", "PLCs", "HMI/SCADA integration"]},
+        {"desc": "Advanced automation using intelligent modules and predictive analytics; MES integration.", "tech": ["MES systems (Siemens Opcenter, GE Proficy)", "Predictive maintenance platforms (IBM Maximo, Senseye)"]},
+        {"desc": "Intelligent automation using AI modules, neural networks, IIoT platforms, and big data analytics.", "tech": ["AI/ML platforms (SageMaker, Vertex AI)", "ANN frameworks (Keras, PyTorch)", "Digital twins"]}
     ],
     "Safe": [
-        {
-            "desc": "Manual risk control, minimal safety measures.",
-            "tech": ["Safety posters", "Visual inspections"]
-        },
-        {
-            "desc": "Compliance with occupational safety standards (e.g., ISO 45001).",
-            "tech": ["Safety audits", "Risk matrices"]
-        },
-        {
-            "desc": "Integration of machine safety systems (e.g., interlocks, PLCs).",
-            "tech": ["Safety PLCs", "Light curtains", "Emergency stops"]
-        },
-        {
-            "desc": "Smart safety systems with sensors, anomaly detection, and predictive alerts.",
-            "tech": ["Vibration sensors", "AI for failure prediction", "Integrated HSE dashboards"]
-        },
-        {
-            "desc": "AI-powered safety management with cyber-physical protection, incident prediction, and adaptive control systems.",
-            "tech": ["Digital twins for safety", "AI-driven hazard detection", "Cybersecurity software (Darktrace, Fortinet)"]
-        }
+        {"desc": "Manual risk control, minimal safety measures.", "tech": ["Safety posters", "Visual inspections"]},
+        {"desc": "Compliance with occupational safety standards (e.g., ISO 45001).", "tech": ["Safety audits", "Risk matrices"]},
+        {"desc": "Integration of machine safety systems (e.g., interlocks, PLCs).", "tech": ["Safety PLCs", "Light curtains", "Emergency stops"]},
+        {"desc": "Smart safety systems with sensors, anomaly detection, and predictive alerts.", "tech": ["Vibration sensors", "AI for failure prediction", "Integrated HSE dashboards"]},
+        {"desc": "AI-powered safety management with cyber-physical protection, incident prediction, and adaptive control systems.", "tech": ["Digital twins for safety", "AI-driven hazard detection", "Cybersecurity software (Darktrace, Fortinet)"]}
     ]
 }
+
 
 # ----- 5S Checklists for Self-Assessment -----
 five_s_checklists = {
@@ -609,8 +535,7 @@ if st.button("Generate Plan and Recommendations"):
         )
         views_response = stage_views_completion.choices[0].message.content
         stage_views = parse_stage_views(views_response)
-
-
+        st.session_state["stage_views"] = stage_views
 
     # 4. Generate and show the PlantUML diagram
     plantuml_code = build_supply_chain_activity_plantuml_with_views(
