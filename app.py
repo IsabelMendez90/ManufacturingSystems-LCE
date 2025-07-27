@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from openai import OpenAI
+from fpdf import FPDF
+from io import BytesIO
+from datetime import datetime
 import zlib
 
 import re
@@ -646,3 +649,62 @@ if st.session_state["chat_history"]:
         elif entry["role"] == "assistant":
             st.markdown(f"**Assistant:** {entry['content']}")
 
+def generate_pdf_report():
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    # --- Title ---
+    pdf.cell(200, 10, "LCE + 5S Manufacturing Decision Support Report", ln=True, align="C")
+
+    # --- User Selections ---
+    pdf.ln(8)
+    pdf.set_font("Arial", "B", size=12)
+    pdf.cell(0, 10, "User Inputs", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 8, f"Objective: {objective}", ln=True)
+    pdf.cell(0, 8, f"Industry: {industry}", ln=True)
+    pdf.cell(0, 8, f"Role: {final_role}", ln=True)
+    pdf.cell(0, 8, f"System Type: {system_type}", ln=True)
+    pdf.multi_cell(0, 8, f"LCE Stages: {', '.join(selected_stages) if selected_stages else 'None'}")
+    pdf.multi_cell(0, 8, f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}")
+
+    # --- LLM Results ---
+    pdf.ln(6)
+    pdf.set_font("Arial", "B", size=12)
+    pdf.cell(0, 10, "LLM Results", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8, f"Supply Chain Plan:\n{st.session_state.get('supply_chain_section', '')}\n")
+    pdf.multi_cell(0, 8, f"Improvement Opportunities & Risks:\n{st.session_state.get('improvement_section', '')}\n")
+    pdf.multi_cell(0, 8, f"Digital/AI Next Steps:\n{st.session_state.get('ai_section', '')}\n")
+
+    # --- Conversation History ---
+    pdf.ln(6)
+    pdf.set_font("Arial", "B", size=12)
+    pdf.cell(0, 10, "Conversation History", ln=True)
+    pdf.set_font("Arial", size=12)
+    for entry in st.session_state.get("chat_history", []):
+        if entry["role"] == "user":
+            pdf.set_font("Arial", "B", size=12)
+            pdf.multi_cell(0, 8, f"You: {entry['content']}")
+            pdf.set_font("Arial", size=12)
+        elif entry["role"] == "assistant":
+            pdf.multi_cell(0, 8, f"Assistant: {entry['content']}")
+    
+    # Save PDF to buffer
+    buf = BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+    return buf
+pdf_buf = generate_pdf_report()
+# Generate filename with timestamp
+timestamp = datetime.now().strftime("%m-%d-%y_%H%M")
+filename = f"{timestamp}-Report.pdf"
+# --- Download Button ---
+pdf_buf = generate_pdf_report()
+st.download_button(
+    label="Download Full Report (PDF)",
+    data=pdf_buf,
+    file_name=filename,
+    mime="application/pdf"
+)
