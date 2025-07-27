@@ -554,13 +554,14 @@ if "supply_chain_section" in st.session_state:
     displayed_stages = st.session_state.get("selected_stages", [])
     stage_views = st.session_state.get("stage_views", {})
 
-    st.markdown("**Selected LCE Stage Activities & Engineering Views:**")
-    if displayed_stages and stage_views:
+    st.markdown("**Selected LCE Stage:**")    
+    if displayed_stages:
         st.markdown("<ul style='margin-top: 0; margin-bottom: 0;'>", unsafe_allow_html=True)
         for action in displayed_stages:
             stage, desc = action.split(":", 1)
-            st.markdown(f"<li><b>{stage.strip()}</b>: {desc.strip()}", unsafe_allow_html=True)
-            views = stage_views.get(stage.strip(), {})
+            stage_key = stage.strip()
+            views = stage_views.get(stage_key, {})
+            st.markdown(f"<li><b>{stage_key}</b>: {desc.strip()}", unsafe_allow_html=True)
             if views:
                 st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
                 for key, label in [
@@ -574,10 +575,15 @@ if "supply_chain_section" in st.session_state:
                     if value:
                         st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
                 st.markdown("</ul>", unsafe_allow_html=True)
+            else:
+                st.markdown("<ul><li><i>No engineering views available yet.</i></li></ul>", unsafe_allow_html=True)
             st.markdown("</li>", unsafe_allow_html=True)
         st.markdown("</ul>", unsafe_allow_html=True)
     else:
         st.info("No LCE stage activities selected.")
+    st.session_state["selected_stages"] = selected_stages
+    st.write("DEBUG: displayed_stages = ", displayed_stages)
+
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
     
