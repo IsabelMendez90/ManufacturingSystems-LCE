@@ -15,7 +15,7 @@ import re
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
 st.set_page_config(page_title="LCE + 5S Decision Support Tool", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
-st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
+st.markdown("Developed by: Dr. J. Isabel Méndez and Dr. Arturo Molina")
 # ----- 5S Taxonomy with Technologies -----
 five_s_taxonomy = {
     "Social": [
@@ -592,7 +592,6 @@ if "supply_chain_section" in st.session_state:
     else:
         st.info("No LCE stage activities selected.")
     st.session_state["selected_stages"] = selected_stages
-    st.write("DEBUG: displayed_stages = ", displayed_stages)
 
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
@@ -702,6 +701,9 @@ def generate_pdf_report():
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, to_latin1("LCE + 5S Manufacturing Decision Support Report"), ln=True, align="C")
+    pdf.set_font("Arial", size=11)
+    pdf.cell(200, 10, to_latin1("Developed by Dr. Juana Isabel Méndez and Dr. Arturo Molina"), ln=True, align="C")
+    pdf.cell(200, 8, to_latin1("Date: " + datetime.now().strftime("%Y-%m-%d")), ln=True, align="C")
     pdf.ln(8)
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, to_latin1("User Inputs"), ln=True)
