@@ -625,12 +625,14 @@ if st.button("Generate Plan and Recommendations"):
 if "supply_chain_section" in st.session_state:
     st.header("5. Supply Chain Configuration & Action Plan")
     st.markdown(f"**System Type:** {system_type}")
-    st.markdown("**Selected LCE Stage Activities & Engineering Views:**")
-    # Get stage_views either from local variable or session_state (depending how you saved it)
+    # Use session_state for both variables!
+    displayed_stages = st.session_state.get("selected_stages", [])
     stage_views = st.session_state.get("stage_views", {})
-    if selected_stages and stage_views:
+
+    st.markdown("**Selected LCE Stage Activities & Engineering Views:**")
+    if displayed_stages and stage_views:
         st.markdown("<ul style='margin-top: 0; margin-bottom: 0;'>", unsafe_allow_html=True)
-        for action in selected_stages:
+        for action in displayed_stages:
             stage, desc = action.split(":", 1)
             st.markdown(f"<li><b>{stage.strip()}</b>: {desc.strip()}", unsafe_allow_html=True)
             views = stage_views.get(stage.strip(), {})
