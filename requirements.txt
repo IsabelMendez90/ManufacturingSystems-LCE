@@ -1,5 +1,7 @@
 streamlit
 pandas
 plotly
-openai
+requests
 fpdf
+openai
+kaleido
