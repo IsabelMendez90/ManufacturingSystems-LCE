@@ -366,92 +366,6 @@ def parse_stage_views_from_plan(plan_text, selected_stages):
     return out
 
 
-def _sanitize_for_puml(s: str) -> str:
-    if not isinstance(s, str):
-        s = str(s)
-    # PlantUML activity text: avoid raw newlines and semicolons
-    s = s.replace("\r\n", "\n").replace("\r", "\n")
-    s = s.replace("\n", r"\n")
-    # Replace semicolons that would end the statement
-    s = s.replace(";", "；")  # full-width semicolon
-    return s
-
-def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, stage_views):
-    # map system type to bg color
-    sys_type_color = {"Product Transfer":"#8FD3F4","Technology Transfer":"#A1E3B1","Facility Design":"#F4E6A1"}
-    system_color = sys_type_color.get(system_type, "#D9D9D9")
-
-    # canonical order
-    stage_map = [
-        ("Ideation", "Ideation"),
-        ("Basic Development", "BasicDev"),
-        ("Advanced Development", "AdvDev"),
-        ("Launching", "Launching"),
-        ("End-of-Life", "EoL"),
-    ]
-    selected_stage_keys = [label for (label, _) in stage_map if any(label in s for s in lce_stages)]
-
-    code = [
-        "@startuml",
-        f"title Supply Chain Activity Diagram: {system_type}",
-        f"skinparam backgroundColor {system_color}",
-        "skinparam activity {",
-        "  BackgroundColor<<Ideation>> #F2D7D5",
-        "  BackgroundColor<<BasicDev>> #D5F2E3",
-        "  BackgroundColor<<AdvDev>> #D5E1F2",
-        "  BackgroundColor<<Launching>> #F2E6D5",
-        "  BackgroundColor<<EoL>> #F2F2D5",
-        "}",
-        "skinparam wrapWidth 240",
-        "skinparam maxMessageSize 240",
-        f"note right\nSystem Type: {system_type}\nend note"
-    ]
-
-    header_aliases = []  # keep alias order for arrows
-
-    for stage_label, stereo in stage_map:
-        if stage_label not in selected_stage_keys:
-            continue
-
-        v = stage_views.get(stage_label, {}) or {}
-        F = v.get("Function","(n/a)")
-        O = v.get("Organization","(n/a)")
-        I = v.get("Information","(n/a)")
-        R = v.get("Resource","(n/a)")
-        P = v.get("Performance","(n/a)")
-
-        # make a safe alias
-        alias = "STG_" + re.sub(r"[^A-Za-z0-9_]", "_", stage_label.upper())
-        header_aliases.append(alias)
-
-        code.append(f'partition "{stage_label}" <<{stereo}>> {{')
-
-        # header activity (aliased)
-        code.append(f'activity "{stage_label}" as {alias} <<{stereo}>>')
-
-        # five labeled blocks
-        code.append(f'activity "Analysis / Function:\\n{_sanitize_for_puml(F)}" as {alias}_A1')
-        code.append(f'activity "Synthesis / Organization:\\n{_sanitize_for_puml(O)}" as {alias}_A2')
-        code.append(f'activity "Synthesis / Information:\\n{_sanitize_for_puml(I)}" as {alias}_A3')
-        code.append(f'activity "Synthesis / Resource:\\n{_sanitize_for_puml(R)}" as {alias}_A4')
-        code.append(f'activity "Evaluation / Performance:\\n{_sanitize_for_puml(P)}" as {alias}_A5')
-
-        # vertical linking inside the partition
-        code.append(f"{alias} --> {alias}_A1")
-        code.append(f"{alias}_A1 --> {alias}_A2")
-        code.append(f"{alias}_A2 --> {alias}_A3")
-        code.append(f"{alias}_A3 --> {alias}_A4")
-        code.append(f"{alias}_A4 --> {alias}_A5")
-
-        code.append("}")  # end partition
-
-    # connect headers in order
-    for a, b in zip(header_aliases, header_aliases[1:]):
-        code.append(f"{a} --> {b}")
-
-    code.append("@enduml")
-    return "\n".join(code)
-
 def render_lce_smartart(stage_views, selected_stages):
     # columns = selected stages; rows = the five labels
     stage_keys = [s.split(":")[0].strip() for s in selected_stages]
@@ -493,37 +407,6 @@ def render_lce_smartart(stage_views, selected_stages):
            f'<div class="smartart">{hdr}{rows}</div>'
     st.markdown(html, unsafe_allow_html=True)
 
-def plantuml_encode(text):
-    import base64
-    def deflate_and_encode(data):
-        zlibbed_str = zlib.compress(data.encode('utf-8'))
-        compressed_string = zlibbed_str[2:-4]
-        return encode64(compressed_string)
-    def encode6bit(b):
-        if b < 10: return chr(48 + b)
-        b -= 10
-        if b < 26: return chr(65 + b)
-        b -= 26
-        if b < 26: return chr(97 + b)
-        b -= 26
-        if b == 0: return '-'
-        if b == 1: return '_'
-        return '?'
-    def encode64(data):
-        res = ''
-        length = len(data)
-        i = 0
-        while i < length:
-            b1 = data[i] & 0xFF
-            b2 = data[i+1] & 0xFF if i+1 < length else 0
-            b3 = data[i+2] & 0xFF if i+2 < length else 0
-            res += encode6bit(b1 >> 2)
-            res += encode6bit(((b1 & 0x3) << 4) | (b2 >> 4))
-            res += encode6bit(((b2 & 0xF) << 2) | (b3 >> 6))
-            res += encode6bit(b3 & 0x3F)
-            i += 3
-        return res
-    return deflate_and_encode(text)
 
 def build_stage_views_prompt_json(context_block, selected_stages):
     stages = [s.split(":")[0].strip() for s in selected_stages]
@@ -676,11 +559,6 @@ if st.button("Generate Plan and Recommendations"):
     if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
         stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
 
-    # Sanitize for PlantUML
-    for _k, d in stage_views.items():
-        for subk in list(d.keys()):
-            d[subk] = _sanitize_for_puml(d[subk])
-
     st.session_state["stage_views"] = stage_views
 
     # (Optional) debug expanders
@@ -689,14 +567,6 @@ if st.button("Generate Plan and Recommendations"):
     with st.expander("Debug: parsed stage_views"):
         st.json(stage_views)
 
-
-    # 4. Generate and show the PlantUML diagram
-    plantuml_code = build_supply_chain_activity_plantuml_with_views(
-        system_type=system_type,
-        lce_stages=selected_stages,
-        stage_views=stage_views
-    )
-    st.session_state["plantuml_code"] = plantuml_code
 
 
 # Always show Step 5 if plan/results exist in session_state
@@ -739,12 +609,6 @@ if "supply_chain_section" in st.session_state:
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
     
-    if "plantuml_code" in st.session_state:
-        plantuml_code = st.session_state["plantuml_code"]
-        plantuml_url_code = plantuml_encode(plantuml_code)
-        plantuml_svg_url = f"https://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
-        st.markdown(f"[Open in new window]({plantuml_svg_url})")
-        st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
     render_lce_smartart(stage_views, displayed_stages)
 # --- Step 6 if previous responses exist in session_state
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
@@ -859,19 +723,6 @@ def generate_pdf_report():
     five_s_levels = st.session_state.get("five_s_levels", {})
     pdf.multi_cell(0, 8, to_latin1(f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}"))
 
-    # --- PlantUML Diagram ---
-    plantuml_code = st.session_state.get("plantuml_code", None)
-    if plantuml_code:
-        plantuml_url_code = plantuml_encode(plantuml_code)
-        plantuml_png_url = f"https://www.plantuml.com/plantuml/png/{plantuml_url_code}"
-        response = requests.get(plantuml_png_url)
-        if response.status_code == 200:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
-                tmp_img.write(response.content)
-                tmp_img.flush()
-                pdf.cell(0, 10, "Supply Chain Activity Diagram", ln=True)
-                pdf.image(tmp_img.name, x=10, y=pdf.get_y(), w=180)
-                pdf.ln(85)
 
     # --- Current 5S Radar Chart (NO image in PDF on Streamlit Cloud) ---
     if five_s_levels:
