@@ -531,41 +531,71 @@ if st.button("Generate Plan and Recommendations"):
 if "supply_chain_section" in st.session_state:
     st.header("5. Supply Chain Configuration & Action Plan")
     st.markdown(f"**System Type:** {system_type}")
+
     # Use session_state for both variables!
     displayed_stages = st.session_state.get("selected_stages", [])
     stage_views = st.session_state.get("stage_views", {})
 
-    st.markdown("**Selected LCE Stage:**")    
+    st.markdown("**Selected LCE Stage:**")
     if displayed_stages:
         st.markdown("<ul style='margin-top: 0; margin-bottom: 0;'>", unsafe_allow_html=True)
+
         for action in displayed_stages:
-            stage, desc = action.split(":", 1)
+            # Be robust to missing ":" just in case
+            if ":" in action:
+                stage, desc = action.split(":", 1)
+            else:
+                stage, desc = action, ""
             stage_key = stage.strip()
             views = stage_views.get(stage_key, {})
+
             st.markdown(f"<li><b>{stage_key}</b>: {desc.strip()}", unsafe_allow_html=True)
+
             if views:
+                # === Grouped engineering views ===
+                groups = [
+                    ("Engineering Analysis", [("Function", "Function")]),
+                    ("Engineering Synthesis", [
+                        ("Organization", "Organization"),
+                        ("Information", "Information"),
+                        ("Resource", "Resource")
+                    ]),
+                    ("Engineering Evaluation", [("Performance", "Performance")]),
+                ]
+
                 st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
-                for key, label in [
-                    ("Function", "Function"),
-                    ("Organization", "Organization"),
-                    ("Information", "Information"),
-                    ("Resource", "Resource"),
-                    ("Performance", "Performance")
-                ]:
-                    value = views.get(key, "").strip()
-                    if value:
-                        st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
+
+                for heading, items in groups:
+                    present = []
+                    for label, key in items:
+                        value = views.get(key, "").strip()
+                        if value:
+                            present.append((label, value))
+
+                    if present:
+                        st.markdown(f"<li><b>{heading}</b>", unsafe_allow_html=True)
+                        st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
+                        for label, value in present:
+                            st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
+                        st.markdown("</ul></li>", unsafe_allow_html=True)
+
                 st.markdown("</ul>", unsafe_allow_html=True)
             else:
                 st.markdown("<ul><li><i>No engineering views available yet.</i></li></ul>", unsafe_allow_html=True)
+
             st.markdown("</li>", unsafe_allow_html=True)
+
         st.markdown("</ul>", unsafe_allow_html=True)
     else:
         st.info("No LCE stage activities selected.")
+
+    # Keep session_state consistent (mirror back what we displayed)
+    selected_stages = displayed_stages
     st.session_state["selected_stages"] = selected_stages
 
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
+
 
 # --- Step 6 if previous responses exist in session_state
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
