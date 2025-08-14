@@ -377,9 +377,11 @@ def _sanitize_for_puml(s: str) -> str:
     return s
 
 def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, stage_views):
+    # map system type to bg color
     sys_type_color = {"Product Transfer":"#8FD3F4","Technology Transfer":"#A1E3B1","Facility Design":"#F4E6A1"}
     system_color = sys_type_color.get(system_type, "#D9D9D9")
 
+    # canonical order
     stage_map = [
         ("Ideation", "Ideation"),
         ("Basic Development", "BasicDev"),
@@ -405,42 +407,50 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
         f"note right\nSystem Type: {system_type}\nend note"
     ]
 
-    header_nodes = []
+    header_aliases = []  # keep alias order for arrows
 
     for stage_label, stereo in stage_map:
         if stage_label not in selected_stage_keys:
             continue
 
-        v = stage_views.get(stage_label, {})
-        F = v.get("Function","") or "(n/a)"
-        O = v.get("Organization","") or "(n/a)"
-        I = v.get("Information","")  or "(n/a)"
-        R = v.get("Resource","")     or "(n/a)"
-        P = v.get("Performance","")  or "(n/a)"
+        v = stage_views.get(stage_label, {}) or {}
+        F = v.get("Function","(n/a)")
+        O = v.get("Organization","(n/a)")
+        I = v.get("Information","(n/a)")
+        R = v.get("Resource","(n/a)")
+        P = v.get("Performance","(n/a)")
+
+        # make a safe alias
+        alias = "STG_" + re.sub(r"[^A-Za-z0-9_]", "_", stage_label.upper())
+        header_aliases.append(alias)
 
         code.append(f'partition "{stage_label}" <<{stereo}>> {{')
-        code.append(f":{stage_label}; <<{stereo}>>")  # header activity for linking
-        header_nodes.append(stage_label)
 
-        code.append("== Engineering Analysis ==")
-        code.append(f":Function\\n{F};")
+        # header activity (aliased)
+        code.append(f'activity "{stage_label}" as {alias} <<{stereo}>>')
 
-        code.append("== Engineering Synthesis ==")
-        code.append(f":Organization\\n{O};")
-        code.append(f":Information\\n{I};")
-        code.append(f":Resource\\n{R};")
+        # five labeled blocks
+        code.append(f'activity "Analysis / Function:\\n{_sanitize_for_puml(F)}" as {alias}_A1')
+        code.append(f'activity "Synthesis / Organization:\\n{_sanitize_for_puml(O)}" as {alias}_A2')
+        code.append(f'activity "Synthesis / Information:\\n{_sanitize_for_puml(I)}" as {alias}_A3')
+        code.append(f'activity "Synthesis / Resource:\\n{_sanitize_for_puml(R)}" as {alias}_A4')
+        code.append(f'activity "Evaluation / Performance:\\n{_sanitize_for_puml(P)}" as {alias}_A5')
 
-        code.append("== Engineering Evaluation ==")
-        code.append(f":Performance\\n{P};")
-        code.append("}")
+        # vertical linking inside the partition
+        code.append(f"{alias} --> {alias}_A1")
+        code.append(f"{alias}_A1 --> {alias}_A2")
+        code.append(f"{alias}_A2 --> {alias}_A3")
+        code.append(f"{alias}_A3 --> {alias}_A4")
+        code.append(f"{alias}_A4 --> {alias}_A5")
 
-    # Link headers in order
-    for a, b in zip(header_nodes, header_nodes[1:]):
-        code.append(f":{a}; --> :{b};")
+        code.append("}")  # end partition
+
+    # connect headers in order
+    for a, b in zip(header_aliases, header_aliases[1:]):
+        code.append(f"{a} --> {b}")
 
     code.append("@enduml")
     return "\n".join(code)
-
 
 
 def plantuml_encode(text):
