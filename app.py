@@ -218,6 +218,19 @@ Please respond in the following format:
     return prompt
 
 
+def build_context_block(objective, system_type, industry, five_s_levels, selected_stages, plan_text=""):
+    stages_list = [s.split(":")[0].strip() for s in selected_stages]
+    five_s_str = ", ".join([f"{k}: {v}" for k, v in five_s_levels.items()])
+    return f"""PROJECT CONTEXT
+- Objective: {objective}
+- System Type: {system_type}
+- Industry: {industry}
+- 5S Levels: {five_s_str}
+- Selected LCE Stages: {", ".join(stages_list) if stages_list else "None"}
+
+Recent plan (if any):
+{plan_text}
+"""
 
 # ========== Streamlit App Layout ==========
 
@@ -302,28 +315,56 @@ for i, dim in enumerate(five_s_taxonomy):
 st.session_state["five_s_levels"] = five_s_levels
 
 
-def parse_stage_views(llm_response, selected_stages):
-    # Simple stage names for fuzzy matching
-    stage_names = [action.split(":")[0].strip() for action in selected_stages]
-    pattern = re.compile(
-        r"\[(.*?)\]\s*Engineering Analysis:\s*Function:\s*(.*?)\nEngineering Synthesis:\s*Organization:\s*(.*?)\n\s*Information:\s*(.*?)\n\s*Resource:\s*(.*?)\nEngineering Evaluation:\s*Performance:\s*(.*?)(?=\n\[|$)", 
-        re.DOTALL
-    )
-    views_dict = {}
-    for match in pattern.finditer(llm_response):
-        header = match.group(1).strip()
-        # Try to find matching stage name (startwith for fuzzy match)
-        for stage in stage_names:
-            if header.startswith(stage):
-                views_dict[stage] = {
-                    "Function": match.group(2).strip(),
-                    "Organization": match.group(3).strip(),
-                    "Information": match.group(4).strip(),
-                    "Resource": match.group(5).strip(),
-                    "Performance": match.group(6).strip(),
-                }
-                break
-    return views_dict
+import json
+
+def parse_stage_views_json(llm_response, selected_stages):
+    # Grab the JSON object from the reply (in case there is stray text)
+    m = re.search(r"\{.*\}", llm_response, flags=re.DOTALL)
+    payload = m.group(0) if m else llm_response
+    data = json.loads(payload)
+
+    stage_keys = [s.split(":")[0].strip() for s in selected_stages]
+    out = {}
+    for item in data.get("stages", []):
+        name = (item.get("name") or "").strip()
+        if name in stage_keys:
+            A = item.get("Analysis", {}) or {}
+            S = item.get("Synthesis", {}) or {}
+            E = item.get("Evaluation", {}) or {}
+            out[name] = {
+                "Function":     (A.get("Function")     or "").strip(),
+                "Organization": (S.get("Organization") or "").strip(),
+                "Information":  (S.get("Information")  or "").strip(),
+                "Resource":     (S.get("Resource")     or "").strip(),
+                "Performance":  (E.get("Performance")  or "").strip(),
+            }
+    return out
+
+def parse_stage_views_from_plan(plan_text, selected_stages):
+    # tolerant extractor from the plan text you already have
+    stage_keys = [s.split(":")[0].strip() for s in selected_stages]
+    out = {k: {"Function":"","Organization":"","Information":"","Resource":"","Performance":""} for k in stage_keys}
+
+    # Split by stage headers like 'Ideation:' or '[Ideation]'
+    union = "|".join(re.escape(k) for k in stage_keys)
+    parts = re.split(rf"(?:^\[({union})\]\s*|^({union})\s*:)", plan_text, flags=re.MULTILINE)
+    i = 1
+    while i < len(parts):
+        name = (parts[i] or parts[i+1] or "").strip()
+        body = parts[i+2] if i+2 < len(parts) else ""
+        if name in out:
+            def grab(label):
+                m = re.search(rf"{label}\s*:\s*(.*?)(?:(?:\n[A-Z][A-Za-z \-/]+?\s*:)|\Z)", body, flags=re.DOTALL)
+                return (m.group(1).strip() if m else "")
+            out[name]["Function"]     = grab("Function")
+            out[name]["Organization"] = grab("Organization")
+            out[name]["Information"]  = grab("Information")
+            out[name]["Resource"]     = grab("Resource")
+            out[name]["Performance"]  = grab("Performance")
+        i += 3
+
+    return out
+
 
 def _sanitize_for_puml(s: str) -> str:
     if not isinstance(s, str):
@@ -336,14 +377,9 @@ def _sanitize_for_puml(s: str) -> str:
     return s
 
 def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, stage_views):
-    sys_type_color = {
-        "Product Transfer": "#8FD3F4",
-        "Technology Transfer": "#A1E3B1",
-        "Facility Design": "#F4E6A1"
-    }
+    sys_type_color = {"Product Transfer":"#8FD3F4","Technology Transfer":"#A1E3B1","Facility Design":"#F4E6A1"}
     system_color = sys_type_color.get(system_type, "#D9D9D9")
 
-    # Order + stereotype map
     stage_map = [
         ("Ideation", "Ideation"),
         ("Basic Development", "BasicDev"),
@@ -351,8 +387,6 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
         ("Launching", "Launching"),
         ("End-of-Life", "EoL"),
     ]
-
-    # Which stages are actually selected, in canonical order
     selected_stage_keys = [label for (label, _) in stage_map if any(label in s for s in lce_stages)]
 
     code = [
@@ -360,60 +394,49 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
         f"title Supply Chain Activity Diagram: {system_type}",
         f"skinparam backgroundColor {system_color}",
         "skinparam activity {",
-        "BackgroundColor<<Ideation>> #F2D7D5",
-        "BackgroundColor<<BasicDev>> #D5F2E3",
-        "BackgroundColor<<AdvDev>> #D5E1F2",
-        "BackgroundColor<<Launching>> #F2E6D5",
-        "BackgroundColor<<EoL>> #F2F2D5",
+        "  BackgroundColor<<Ideation>> #F2D7D5",
+        "  BackgroundColor<<BasicDev>> #D5F2E3",
+        "  BackgroundColor<<AdvDev>> #D5E1F2",
+        "  BackgroundColor<<Launching>> #F2E6D5",
+        "  BackgroundColor<<EoL>> #F2F2D5",
         "}",
+        "skinparam wrapWidth 240",
+        "skinparam maxMessageSize 240",
         f"note right\nSystem Type: {system_type}\nend note"
     ]
 
-    # Create partitions with a stage "header" activity that has an alias
-    stage_aliases = {}  # e.g., {"Ideation": "STG_IDEATION"}
-    for stage_label, stereotype in stage_map:
+    header_nodes = []
+
+    for stage_label, stereo in stage_map:
         if stage_label not in selected_stage_keys:
             continue
 
-        alias = "STG_" + re.sub(r"[^A-Za-z0-9_]", "_", stage_label.upper())
-        stage_aliases[stage_label] = alias
+        v = stage_views.get(stage_label, {})
+        F = v.get("Function","") or "(n/a)"
+        O = v.get("Organization","") or "(n/a)"
+        I = v.get("Information","")  or "(n/a)"
+        R = v.get("Resource","")     or "(n/a)"
+        P = v.get("Performance","")  or "(n/a)"
 
-        code.append(f'partition "{stage_label}" <<{stereotype}>> {{')
-        # Header node for the stage (this is what we connect with arrows)
-        code.append(f'activity "{stage_label}" as {alias} <<{stereotype}>>')
+        code.append(f'partition "{stage_label}" <<{stereo}>> {{')
+        code.append(f":{stage_label}; <<{stereo}>>")  # header activity for linking
+        header_nodes.append(stage_label)
 
-        # If we have detailed views, render them as separate activities in this partition
-        if stage_label in stage_views:
-            v = stage_views[stage_label]
-            # Build pretty, sanitized labels
-            blocks = [
-                ("Analysis / Function", v.get("Function", "")),
-                ("Synthesis / Organization", v.get("Organization", "")),
-                ("Synthesis / Information", v.get("Information", "")),
-                ("Synthesis / Resource", v.get("Resource", "")),
-                ("Evaluation / Performance", v.get("Performance", "")),
-            ]
-            # Create sub-activities with unique aliases (optional linking inside a stage)
-            prev_alias = alias
-            for i, (hdr, body) in enumerate(blocks, 1):
-                if not body:
-                    continue
-                label = _sanitize_for_puml(f"{hdr}: {body}")
-                sub_alias = f"{alias}_A{i}"
-                code.append(f'activity "{label}" as {sub_alias}')
-                # simple vertical flow inside the partition
-                code.append(f"{prev_alias} --> {sub_alias}")
-                prev_alias = sub_alias
-        else:
-            # Simple placeholder activity (still sanitized, though not strictly needed)
-            code.append(f'activity "{stage_label} Key Activities" as {alias}_KEYS')
+        code.append("== Engineering Analysis ==")
+        code.append(f":Function\\n{F};")
 
-        code.append("}")  # end partition
+        code.append("== Engineering Synthesis ==")
+        code.append(f":Organization\\n{O};")
+        code.append(f":Information\\n{I};")
+        code.append(f":Resource\\n{R};")
 
-    # Now connect **stage header aliases** in order
-    ordered_aliases = [stage_aliases[s] for s in selected_stage_keys]
-    for a, b in zip(ordered_aliases, ordered_aliases[1:]):
-        code.append(f"{a} --> {b}")
+        code.append("== Engineering Evaluation ==")
+        code.append(f":Performance\\n{P};")
+        code.append("}")
+
+    # Link headers in order
+    for a, b in zip(header_nodes, header_nodes[1:]):
+        code.append(f":{a}; --> :{b};")
 
     code.append("@enduml")
     return "\n".join(code)
@@ -452,36 +475,35 @@ def plantuml_encode(text):
         return res
     return deflate_and_encode(text)
 
-def build_stage_views_prompt(selected_stages):
-    stages_str = "\n".join([f"- {stage}" for stage in selected_stages])
-    context = """
-For each selected LCE stage, provide a structured description of the following engineering activity views.
+def build_stage_views_prompt_json(context_block, selected_stages):
+    stages = [s.split(":")[0].strip() for s in selected_stages]
+    stages_str = ", ".join(stages)
+    return f"""
+{context_block}
 
-Engineering activities are classified as:
-- **Analysis**: Diagnosing, defining, and preparing information.
-    - **Function**: Main system functionality, core processes, and activities.
-- **Synthesis**: Arranging elements to create new effects and system order.
-    - **Organization**: Key human roles, teams, partners, and their structure.
-    - **Information**: Key data, documents, and knowledge required or generated.
-    - **Resource**: Tools, systems, methodologies, and infrastructure used.
-- **Evaluation**: Testing solutions against goals and requirements.
-    - **Performance**: Main KPIs or outcomes tracked, aligned to company goals.
+Return ONLY a JSON object (no prose) with this schema:
 
-**Respond strictly in this markdown format for each stage (use only this format, no explanations):**
+{{
+  "stages": [
+    {{
+      "name": "<one of: {stages_str}>",
+      "Analysis": {{ "Function": "..." }},
+      "Synthesis": {{
+        "Organization": "...",
+        "Information":  "...",
+        "Resource":     "..."
+      }},
+      "Evaluation": {{ "Performance": "..." }}
+    }}
+  ]
+}}
 
-[STAGE NAME]
-Engineering Analysis: 
-    Function: [main process or activity]
-Engineering Synthesis:
-    Organization: [main roles, teams, partners]
-    Information: [main data, docs, or info used/generated]
-    Resource: [main tools, systems, infra]
-Engineering Evaluation:
-    Performance: [main KPIs or outcomes tracked]
+Rules:
+- Include EVERY stage exactly once (for: {stages_str}).
+- Use plain strings (no markdown).
+- Keep fields concise but concrete.
+"""
 
-Stages to describe:
-""" + stages_str
-    return context
 
 
 client = OpenAI(
@@ -555,6 +577,18 @@ if st.button("Generate Plan and Recommendations"):
 
         st.session_state["llm_response"] = llm_response
         st.session_state["supply_chain_section"] = sc_match.group(1).strip() if sc_match else ""
+
+        plan_text = st.session_state.get("supply_chain_section", "")
+        context_block = build_context_block(
+            objective=objective,
+            system_type=system_type,
+            industry=industry,
+            five_s_levels=five_s_levels,
+            selected_stages=selected_stages,
+            plan_text=plan_text
+        )
+
+
         st.session_state["improvement_section"] = imp_match.group(1).strip() if imp_match else ""
         st.session_state["ai_section"] = ai_match.group(1).strip() if ai_match else ""
 
@@ -570,10 +604,9 @@ if st.button("Generate Plan and Recommendations"):
         else:
             st.session_state["expected_5s"] = five_s_levels.copy()
 
-
-    # 2. Get the STAGE VIEWS from LLM
-    stage_views_prompt = build_stage_views_prompt(selected_stages)
-    with st.spinner("Consulting LLM..."):
+    # 2. Get the STAGE VIEWS from LLM (JSON, with full context)
+    stage_views_prompt = build_stage_views_prompt_json(context_block, selected_stages)
+    with st.spinner("Consulting LLM for stage views..."):
         stage_views_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
             messages=[
@@ -582,11 +615,30 @@ if st.button("Generate Plan and Recommendations"):
             ]
         )
         views_response = stage_views_completion.choices[0].message.content
-        stage_views = parse_stage_views(views_response, selected_stages)
-        for _k, d in stage_views.items():
-            for subk in list(d.keys()):
-                d[subk] = _sanitize_for_puml(d[subk])
-        st.session_state["stage_views"] = stage_views
+
+    # Parse JSON first
+    try:
+        stage_views = parse_stage_views_json(views_response, selected_stages)
+    except Exception:
+        stage_views = {}
+
+    # Fallback: extract from the plan text if JSON was empty
+    if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
+        stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
+
+    # Sanitize for PlantUML
+    for _k, d in stage_views.items():
+        for subk in list(d.keys()):
+            d[subk] = _sanitize_for_puml(d[subk])
+
+    st.session_state["stage_views"] = stage_views
+
+    # (Optional) debug expanders
+    with st.expander("Debug: raw stage-views LLM output"):
+        st.code(views_response)
+    with st.expander("Debug: parsed stage_views"):
+        st.json(stage_views)
+
 
     # 4. Generate and show the PlantUML diagram
     plantuml_code = build_supply_chain_activity_plantuml_with_views(
