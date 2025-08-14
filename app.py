@@ -532,70 +532,82 @@ if "supply_chain_section" in st.session_state:
     st.header("5. Supply Chain Configuration & Action Plan")
     st.markdown(f"**System Type:** {system_type}")
 
-    # Use session_state for both variables!
     displayed_stages = st.session_state.get("selected_stages", [])
     stage_views = st.session_state.get("stage_views", {})
 
     st.markdown("**Selected LCE Stage:**")
     if displayed_stages:
-        st.markdown("<ul style='margin-top: 0; margin-bottom: 0;'>", unsafe_allow_html=True)
+        # Top-level list
+        st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
 
         for action in displayed_stages:
-            # Be robust to missing ":" just in case
+            # Safe split
             if ":" in action:
                 stage, desc = action.split(":", 1)
             else:
                 stage, desc = action, ""
             stage_key = stage.strip()
+            desc = desc.strip()
             views = stage_views.get(stage_key, {})
 
-            st.markdown(f"<li><b>{stage_key}</b>: {desc.strip()}", unsafe_allow_html=True)
+            # 1) Stage line in one bullet
+            st.markdown(
+                f"<li><b>Stage -> {stage_key}</b>: {desc if desc else ''}",
+                unsafe_allow_html=True
+            )
 
-            if views:
-                # === Grouped engineering views ===
-                groups = [
-                    ("Engineering Analysis", [("Function", "Function")]),
-                    ("Engineering Synthesis", [
-                        ("Organization", "Organization"),
-                        ("Information", "Information"),
-                        ("Resource", "Resource")
-                    ]),
-                    ("Engineering Evaluation", [("Performance", "Performance")]),
-                ]
+            # 2) Inner list with grouped engineering sections
+            st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
 
-                st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
+            groups = [
+                ("Engineering Analysis", [("Function", "Function")]),
+                ("Engineering Synthesis", [
+                    ("Organization", "Organization"),
+                    ("Information", "Information"),
+                    ("Resource", "Resource"),
+                ]),
+                ("Engineering Evaluation", [("Performance", "Performance")]),
+            ]
 
-                for heading, items in groups:
-                    present = []
-                    for label, key in items:
-                        value = views.get(key, "").strip()
-                        if value:
-                            present.append((label, value))
+            for heading, items in groups:
+                # Collect non-empty items for this heading
+                present = []
+                for label, key in items:
+                    value = views.get(key, "")
+                    value = value.strip() if isinstance(value, str) else ""
+                    if value:
+                        present.append((label, value))
 
-                    if present:
-                        st.markdown(f"<li><b>{heading}</b>", unsafe_allow_html=True)
-                        st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
-                        for label, value in present:
-                            st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
-                        st.markdown("</ul></li>", unsafe_allow_html=True)
+                # Only show the heading if it has at least one item
+                if present:
+                    # Heading bullet (“o …” style via text label)
+                    st.markdown(
+                        f"<li><b>{heading}</b>",
+                        unsafe_allow_html=True
+                    )
+                    # Items under the heading (Function/Organization/…)
+                    st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
+                    for label, value in present:
+                        # “ …” style via nested bullet
+                        st.markdown(
+                            f"<li><i>{label}:</i> {value}</li>",
+                            unsafe_allow_html=True
+                        )
+                    st.markdown("</ul></li>", unsafe_allow_html=True)
 
-                st.markdown("</ul>", unsafe_allow_html=True)
-            else:
-                st.markdown("<ul><li><i>No engineering views available yet.</i></li></ul>", unsafe_allow_html=True)
+            # Close inner list and the Stage bullet
+            st.markdown("</ul></li>", unsafe_allow_html=True)
 
-            st.markdown("</li>", unsafe_allow_html=True)
-
+        # Close top-level list
         st.markdown("</ul>", unsafe_allow_html=True)
     else:
         st.info("No LCE stage activities selected.")
 
-    # Keep session_state consistent (mirror back what we displayed)
-    selected_stages = displayed_stages
-    st.session_state["selected_stages"] = selected_stages
+    # Keep session_state consistent
+    st.session_state["selected_stages"] = displayed_stages
 
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
-
 
 # --- Step 6 if previous responses exist in session_state
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
