@@ -519,13 +519,6 @@ if st.button("Generate Plan and Recommendations"):
 
     st.session_state["stage_views"] = stage_views
 
-    # (Optional) debug expanders
-    with st.expander("Debug: raw stage-views LLM output"):
-        st.code(views_response)
-    with st.expander("Debug: parsed stage_views"):
-        st.json(stage_views)
-
-
 
 # Always show Step 5 if plan/results exist in session_state
 if "supply_chain_section" in st.session_state:
