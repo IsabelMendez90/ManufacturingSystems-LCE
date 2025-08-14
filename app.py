@@ -343,6 +343,7 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
     }
     system_color = sys_type_color.get(system_type, "#D9D9D9")
 
+    # Order + stereotype map
     stage_map = [
         ("Ideation", "Ideation"),
         ("Basic Development", "BasicDev"),
@@ -351,6 +352,7 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
         ("End-of-Life", "EoL"),
     ]
 
+    # Which stages are actually selected, in canonical order
     selected_stage_keys = [label for (label, _) in stage_map if any(label in s for s in lce_stages)]
 
     code = [
@@ -364,24 +366,26 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
         "BackgroundColor<<Launching>> #F2E6D5",
         "BackgroundColor<<EoL>> #F2F2D5",
         "}",
-        "skinparam wrapWidth 240",
-        "skinparam maxMessageSize 240",
         f"note right\nSystem Type: {system_type}\nend note"
     ]
 
-    # Build partitions and nodes
+    # Create partitions with a stage "header" activity that has an alias
+    stage_aliases = {}  # e.g., {"Ideation": "STG_IDEATION"}
     for stage_label, stereotype in stage_map:
         if stage_label not in selected_stage_keys:
             continue
 
+        alias = "STG_" + re.sub(r"[^A-Za-z0-9_]", "_", stage_label.upper())
+        stage_aliases[stage_label] = alias
+
         code.append(f'partition "{stage_label}" <<{stereotype}>> {{')
+        # Header node for the stage (this is what we connect with arrows)
+        code.append(f'activity "{stage_label}" as {alias} <<{stereotype}>>')
 
-        # Header node (must ALWAYS exist so links have a target)
-        code.append(f':{stage_label}; <<{stereotype}>>')
-
-        # Detailed views (sanitized, one per line)
+        # If we have detailed views, render them as separate activities in this partition
         if stage_label in stage_views:
             v = stage_views[stage_label]
+            # Build pretty, sanitized labels
             blocks = [
                 ("Analysis / Function", v.get("Function", "")),
                 ("Synthesis / Organization", v.get("Organization", "")),
@@ -389,31 +393,31 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
                 ("Synthesis / Resource", v.get("Resource", "")),
                 ("Evaluation / Performance", v.get("Performance", "")),
             ]
-            prev = f':{stage_label};'
-            idx = 0
-            for hdr, body in blocks:
-                body = _sanitize_for_puml(body)
+            # Create sub-activities with unique aliases (optional linking inside a stage)
+            prev_alias = alias
+            for i, (hdr, body) in enumerate(blocks, 1):
                 if not body:
                     continue
-                idx += 1
                 label = _sanitize_for_puml(f"{hdr}: {body}")
-                sub = f":{stage_label} · {idx}\\n{label};"
-                code.append(sub)
-                code.append(f"{prev} --> {sub}")
-                prev = sub
+                sub_alias = f"{alias}_A{i}"
+                code.append(f'activity "{label}" as {sub_alias}')
+                # simple vertical flow inside the partition
+                code.append(f"{prev_alias} --> {sub_alias}")
+                prev_alias = sub_alias
         else:
-            # Minimal placeholder so the partition isn’t empty
-            code.append(f":{stage_label} · Key Activities;")
+            # Simple placeholder activity (still sanitized, though not strictly needed)
+            code.append(f'activity "{stage_label} Key Activities" as {alias}_KEYS')
 
         code.append("}")  # end partition
 
-    # Cross-stage flow: connect by exact label text
-    ordered = [s for s in selected_stage_keys]
-    for a, b in zip(ordered, ordered[1:]):
-        code.append(f":{a}; --> :{b};")
+    # Now connect **stage header aliases** in order
+    ordered_aliases = [stage_aliases[s] for s in selected_stage_keys]
+    for a, b in zip(ordered_aliases, ordered_aliases[1:]):
+        code.append(f"{a} --> {b}")
 
     code.append("@enduml")
     return "\n".join(code)
+
 
 
 def plantuml_encode(text):
