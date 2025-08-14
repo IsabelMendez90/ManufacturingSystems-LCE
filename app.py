@@ -325,18 +325,35 @@ def parse_stage_views(llm_response, selected_stages):
                 break
     return views_dict
 
+def _sanitize_for_puml(s: str) -> str:
+    if not isinstance(s, str):
+        s = str(s)
+    # PlantUML activity text: avoid raw newlines and semicolons
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = s.replace("\n", r"\n")
+    # Replace semicolons that would end the statement
+    s = s.replace(";", "；")  # full-width semicolon
+    return s
 
-def build_supply_chain_activity_plantuml_with_views(
-    system_type,
-    lce_stages,
-    stage_views
-):
+def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, stage_views):
     sys_type_color = {
         "Product Transfer": "#8FD3F4",
         "Technology Transfer": "#A1E3B1",
         "Facility Design": "#F4E6A1"
     }
     system_color = sys_type_color.get(system_type, "#D9D9D9")
+
+    # Order + stereotype map
+    stage_map = [
+        ("Ideation", "Ideation"),
+        ("Basic Development", "BasicDev"),
+        ("Advanced Development", "AdvDev"),
+        ("Launching", "Launching"),
+        ("End-of-Life", "EoL"),
+    ]
+
+    # Which stages are actually selected, in canonical order
+    selected_stage_keys = [label for (label, _) in stage_map if any(label in s for s in lce_stages)]
 
     code = [
         "@startuml",
@@ -348,38 +365,59 @@ def build_supply_chain_activity_plantuml_with_views(
         "BackgroundColor<<AdvDev>> #D5E1F2",
         "BackgroundColor<<Launching>> #F2E6D5",
         "BackgroundColor<<EoL>> #F2F2D5",
-        "}"
+        "}",
+        f"note right\nSystem Type: {system_type}\nend note"
     ]
 
-    code.append(f"note right\nSystem Type: {system_type}\nend note")
-    stage_map = [
-        ("Ideation", "Ideation"),
-        ("Basic Development", "BasicDev"),
-        ("Advanced Development", "AdvDev"),
-        ("Launching", "Launching"),
-        ("End-of-Life", "EoL"),
-    ]
-    swimlanes = [b for a, b in stage_map if any(a in s for s in lce_stages)]
+    # Create partitions with a stage "header" activity that has an alias
+    stage_aliases = {}  # e.g., {"Ideation": "STG_IDEATION"}
     for stage_label, stereotype in stage_map:
-        if not any(stage_label in s for s in lce_stages):
+        if stage_label not in selected_stage_keys:
             continue
+
+        alias = "STG_" + re.sub(r"[^A-Za-z0-9_]", "_", stage_label.upper())
+        stage_aliases[stage_label] = alias
+
         code.append(f'partition "{stage_label}" <<{stereotype}>> {{')
+        # Header node for the stage (this is what we connect with arrows)
+        code.append(f'activity "{stage_label}" as {alias} <<{stereotype}>>')
+
+        # If we have detailed views, render them as separate activities in this partition
         if stage_label in stage_views:
             v = stage_views[stage_label]
-            code.append(f':Analysis/Function: {v.get("Function","")};')
-            code.append(f':Synthesis/Organization: {v.get("Organization","")};')
-            code.append(f':Synthesis/Information: {v.get("Information","")};')
-            code.append(f':Synthesis/Resource: {v.get("Resource","")};')
-            code.append(f':Evaluation/Performance: {v.get("Performance","")};')
+            # Build pretty, sanitized labels
+            blocks = [
+                ("Analysis / Function", v.get("Function", "")),
+                ("Synthesis / Organization", v.get("Organization", "")),
+                ("Synthesis / Information", v.get("Information", "")),
+                ("Synthesis / Resource", v.get("Resource", "")),
+                ("Evaluation / Performance", v.get("Performance", "")),
+            ]
+            # Create sub-activities with unique aliases (optional linking inside a stage)
+            prev_alias = alias
+            for i, (hdr, body) in enumerate(blocks, 1):
+                if not body:
+                    continue
+                label = _sanitize_for_puml(f"{hdr}: {body}")
+                sub_alias = f"{alias}_A{i}"
+                code.append(f'activity "{label}" as {sub_alias}')
+                # simple vertical flow inside the partition
+                code.append(f"{prev_alias} --> {sub_alias}")
+                prev_alias = sub_alias
         else:
-            code.append(f":{stage_label} Key Activities;")
-        code.append("}")
+            # Simple placeholder activity (still sanitized, though not strictly needed)
+            code.append(f'activity "{stage_label} Key Activities" as {alias}_KEYS')
 
-    for i in range(len(swimlanes) - 1):
-        code.append(f":{stage_map[i][0]} Key Activities; --> :{stage_map[i+1][0]} Key Activities;")
+        code.append("}")  # end partition
+
+    # Now connect **stage header aliases** in order
+    ordered_aliases = [stage_aliases[s] for s in selected_stage_keys]
+    for a, b in zip(ordered_aliases, ordered_aliases[1:]):
+        code.append(f"{a} --> {b}")
 
     code.append("@enduml")
     return "\n".join(code)
+
 
 
 def plantuml_encode(text):
@@ -545,6 +583,9 @@ if st.button("Generate Plan and Recommendations"):
         )
         views_response = stage_views_completion.choices[0].message.content
         stage_views = parse_stage_views(views_response, selected_stages)
+        for _k, d in stage_views.items():
+            for subk in list(d.keys()):
+                d[subk] = _sanitize_for_puml(d[subk])
         st.session_state["stage_views"] = stage_views
 
     # 4. Generate and show the PlantUML diagram
