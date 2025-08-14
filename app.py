@@ -452,6 +452,46 @@ def build_supply_chain_activity_plantuml_with_views(system_type, lce_stages, sta
     code.append("@enduml")
     return "\n".join(code)
 
+def render_lce_smartart(stage_views, selected_stages):
+    # columns = selected stages; rows = the five labels
+    stage_keys = [s.split(":")[0].strip() for s in selected_stages]
+    labels = ["Function","Organization","Information","Resource","Performance"]
+
+    css = """
+    <style>
+      .smartart { display: grid; grid-template-columns: 180px repeat(AUTO_COLS, 1fr); gap: 8px; }
+      .sa-hdr { background:#e5e5e5; border-radius:10px; padding:10px; text-align:center; font-weight:600; }
+      .sa-row { background:#f8f8f8; border-radius:10px; padding:10px; font-weight:600; }
+      .sa-cell { background:#efefef; border-radius:10px; padding:10px; }
+      .sa-row.fn { background:#b3dafe; }       /* Function */
+      .sa-row.org{ background:#bdf2c8; }       /* Organization */
+      .sa-row.info{background:#dfe9ff; }       /* Information */
+      .sa-row.res{ background:#ffecc8; }       /* Resource */
+      .sa-row.perf{background:#ffd9cc; }       /* Performance */
+    </style>
+    """
+
+    hdr = '<div class="sa-row"></div>' + "".join([f'<div class="sa-hdr">{k}</div>' for k in stage_keys])
+
+    def row(label, cls):
+        cells = []
+        for k in stage_keys:
+            v = stage_views.get(k, {}) or {}
+            txt = v.get(label,"") or "<i>—</i>"
+            cells.append(f'<div class="sa-cell">{txt}</div>')
+        return f'<div class="sa-row {cls}">{label}</div>' + "".join(cells)
+
+    rows = "\n".join([
+        row("Function","fn"),
+        row("Organization","org"),
+        row("Information","info"),
+        row("Resource","res"),
+        row("Performance","perf"),
+    ])
+
+    html = css.replace("AUTO_COLS", str(len(stage_keys))) + \
+           f'<div class="smartart">{hdr}{rows}</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 def plantuml_encode(text):
     import base64
@@ -702,9 +742,10 @@ if "supply_chain_section" in st.session_state:
     if "plantuml_code" in st.session_state:
         plantuml_code = st.session_state["plantuml_code"]
         plantuml_url_code = plantuml_encode(plantuml_code)
-        plantuml_svg_url = f"http://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
+        plantuml_svg_url = f"https://www.plantuml.com/plantuml/svg/{plantuml_url_code}"
         st.markdown(f"[Open in new window]({plantuml_svg_url})")
         st.markdown(f"![Supply Chain UML Diagram]({plantuml_svg_url})", unsafe_allow_html=True)
+    render_lce_smartart(stage_views, displayed_stages)
 # --- Step 6 if previous responses exist in session_state
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
     st.subheader("Supply Chain Configuration & Action Plan")
@@ -822,7 +863,7 @@ def generate_pdf_report():
     plantuml_code = st.session_state.get("plantuml_code", None)
     if plantuml_code:
         plantuml_url_code = plantuml_encode(plantuml_code)
-        plantuml_png_url = f"http://www.plantuml.com/plantuml/png/{plantuml_url_code}"
+        plantuml_png_url = f"https://www.plantuml.com/plantuml/png/{plantuml_url_code}"
         response = requests.get(plantuml_png_url)
         if response.status_code == 200:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
