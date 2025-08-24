@@ -1,5 +1,9 @@
 # --- LCE + 5S Decision Support ---
 # Planner → Tools → Reflector loop with standards gate, capacity sizing, doc-intake, risk register
+# Agentic patches:
+#  A) Show capacity results in UI + return from agent
+#  B) Capacity becomes a Standards Gate rule when demand is provided
+#  C) Planner prompt explicitly asks to use takt/stations if available
 
 import streamlit as st
 import pandas as pd
@@ -57,7 +61,7 @@ def llm(msgs, temperature=0.2, seed=42, model="mistralai/mistral-7b-instruct"):
     resp = client.chat.completions.create(model=model, temperature=temperature, seed=seed, messages=msgs)
     return resp.choices[0].message.content or ""
 
-# ------------------------ 5S Taxonomy (same content, condensed text) ------------------------
+# ------------------------ 5S Taxonomy (condensed) ------------------------
 five_s_taxonomy = {
     "Social":[
         {"desc":"No integration of social factors; minimal worker well-being consideration.","tech":[]},
@@ -194,6 +198,8 @@ Relevant document snippets (if any):
 Use the evidence strictly:
 {evidence}
 
+If capacity observations were provided, include explicit takt time and the number of parallel stations in the configuration, layout, staffing, and scheduling decisions.
+
 Return the following sections (markdown, concise and actionable):
 [Supply Chain Configuration & Action Plan]
 [Improvement Opportunities & Risks]
@@ -270,7 +276,7 @@ class CapacityCalculator(Tool):
 
 class StandardsGate(Tool):
     name="standards_gate"
-    # required if context suggests it; we check presence in plan/evidence
+    # Rules include capacity_ref (new) when demand is provided
     RULES = [
         ("quality_system", r"ISO\s?9001"),
         ("environment", r"ISO\s?14001|LCA|GaBi|OpenLCA"),
@@ -279,13 +285,18 @@ class StandardsGate(Tool):
         ("cybersecurity", r"IEC\s?62443|NIST"),
         ("traceability", r"APQP|SPC|traceability|QR|blockchain"),
         ("interoperability", r"OPC[-\s]?UA|MQTT"),
+        # NEW: require the plan to reference takt/stations/line balancing/parallel when capacity is computed
+        ("capacity_ref", r"\btakt\b|\bstations?\b|\bline balancing\b|\bparallel\b"),
     ]
     def run(self, state):
-        text = state._latest_plan_text if hasattr(state, "_latest_plan_text") else ""
-        ev = state._latest_evidence if hasattr(state,"_latest_evidence") else ""
+        text = getattr(state, "_latest_plan_text", "")
+        ev   = getattr(state, "_latest_evidence", "")
         scope = (text + "\n" + ev).lower()
         warnings=[]
-        # Enable rules heuristically based on system type + levels
+
+        has_demand = bool(state.demand_info.get("weekly_output") and state.demand_info.get("cycle_time_sec"))
+
+        # Enable rules heuristically based on system type + levels + demand
         enable = {
             "quality_system": True,
             "environment": state.five_s_levels.get("Sustainable",0) >= 2,
@@ -294,6 +305,7 @@ class StandardsGate(Tool):
             "cybersecurity": (state.five_s_levels.get("Smart",0)>=3 or state.five_s_levels.get("Sensing",0)>=3),
             "traceability": state.system_type in ("Product Transfer","Technology Transfer"),
             "interoperability": state.five_s_levels.get("Sensing",0)>=3,
+            "capacity_ref": has_demand,  # only demand-driven projects must reference capacity explicitly
         }
         for key,regex in self.RULES:
             if enable.get(key):
@@ -343,6 +355,7 @@ def agentic_run(objective, system_type, industry, selected_stages, five_s_levels
     plan_text=""; standards_warnings=[]
 
     steps = 1 if not enable_agentic else max_steps
+    observations=[]  # keep last pass observations for return
     for step in range(steps):
         # PLAN
         plan_text = plan_with_llm(state, evidence)
@@ -390,9 +403,16 @@ def agentic_run(objective, system_type, industry, selected_stages, five_s_levels
                 critic.append(f"CAPACITY SUGGESTION:\n- Target stations: {s['stations']} (takt≈{s['takt_sec']:.1f}s). Reflect in layout, staffing, and scheduling.")
             evidence += "\n\n[NEEDS FIX — ADDRESS IN NEXT PASS]\n" + "\n\n".join(critic)
 
-    # collect risk register (if generated)
+    # collect risk register (if generated) and capacity (Patch A)
     risk = next((o for o in observations if o["tool"]=="risk_register"), {"data":{"risks":[]}})
-    return {"plan_text": plan_text, "standards_warnings": standards_warnings, "risk_register": risk["data"]}
+    cap = next((o for o in observations if o["tool"]=="capacity_calc"), {"data":{}})
+
+    return {
+        "plan_text": plan_text,
+        "standards_warnings": standards_warnings,
+        "risk_register": risk["data"],
+        "capacity": cap.get("data", {})  # exposed for UI
+    }
 
 # ------------------------ UI ------------------------
 
@@ -520,6 +540,16 @@ if res:
         fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension", line_close=True)
         st.plotly_chart(fig_exp, use_container_width=True)
 
+    # ---- Patch A: Show capacity results clearly in the UI
+    st.header("8a) Capacity Sizing (from demand inputs)")
+    cap = res.get("capacity", {})
+    if cap and cap.get("takt_sec") is not None:
+        st.success(f"Computed takt ≈ {cap.get('takt_sec',0):.1f} s | "
+                   f"Required parallel stations: {cap.get('stations','?')}")
+        st.caption("The agent feeds these into the planner; the plan should echo them in layout/staffing.")
+    else:
+        st.info("No capacity calculated (provide weekly output and cycle time in Step 5).")
+
     st.header("9) Standards Gate")
     warns = res.get("standards_warnings", [])
     if warns:
@@ -542,7 +572,7 @@ def to_latin1(text):
     if not isinstance(text,str): text=str(text)
     return text.encode('latin-1','replace').decode('latin-1')
 
-def generate_pdf_report(plan_text, five_s_levels, warnings, risks):
+def generate_pdf_report(plan_text, five_s_levels, warnings, risks, cap):
     pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", size=12)
     pdf.cell(0,10,to_latin1("LCE + 5S Manufacturing Decision Support (Agentic, no-BOM)"), ln=True, align="C")
     pdf.set_font("Arial", size=11)
@@ -552,8 +582,12 @@ def generate_pdf_report(plan_text, five_s_levels, warnings, risks):
     for head in ["Supply Chain Configuration & Action Plan","Improvement Opportunities & Risks","Digital/AI Next Steps","Expected 5S Maturity"]:
         pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1(head), ln=True)
         pdf.set_font("Arial", size=11); pdf.multi_cell(0,7,to_latin1(parse_section(plan_text, head) or "—")); pdf.ln(2)
+    if cap and cap.get("takt_sec") is not None:
+        pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1("Capacity Sizing"), ln=True)
+        pdf.set_font("Arial", size=11)
+        pdf.multi_cell(0,7,to_latin1(f"Takt ≈ {cap.get('takt_sec',0):.1f} s; Required stations: {cap.get('stations','?')}"))
     if warnings:
-        pdf.set_font("Arial","B",12); pdf.cell(0,8,"Standards Gate Warnings", ln=True)
+        pdf.ln(4); pdf.set_font("Arial","B",12); pdf.cell(0,8,"Standards Gate Warnings", ln=True)
         pdf.set_font("Arial", size=11)
         for w in warnings: pdf.multi_cell(0,6,to_latin1(f"- {w}"))
     if risks:
@@ -570,7 +604,8 @@ if res:
         res.get("plan_text",""),
         five_s_levels,
         res.get("standards_warnings",[]),
-        res.get("risk_register",{}).get("risks",[])
+        res.get("risk_register",{}).get("risks",[]),
+        res.get("capacity",{})
     )
     st.download_button("Download Full Report (PDF)", data=pdf_buf,
                        file_name=f"{datetime.now():%Y-%m-%d}_Agentic_NoBOM_Report.pdf", mime="application/pdf")
