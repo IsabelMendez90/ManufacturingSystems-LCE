@@ -160,10 +160,17 @@ def parse_section(text, head):
     return m.group(1).strip() if m else ""
 
 def extract_expected_levels(text, fallback):
-    out={}
-    for dim in ["Social","Sustainable","Sensing","Smart","Safe"]:
-        m = re.search(rf"{dim}\s*[:\-]?\s*(?:Level\s*)?(\d)", text, re.IGNORECASE)
-        out[dim] = int(m.group(1)) if m else fallback.get(dim,0)
+    out = {}
+    if not isinstance(text, str):
+        text = ""
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        # Accept: "Social: 2", "Social: L2", "Social - Level 2", "Social L=2", etc.
+        pat = rf"{dim}\s*[:\-]?\s*(?:L(?:e?vel)?\s*=?\s*)?([0-4])"
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if not m:
+            # looser backup: first digit within 30 chars after the dimension name
+            m = re.search(rf"{dim}.{{0,30}}?([0-4])", text, flags=re.IGNORECASE | re.DOTALL)
+        out[dim] = int(m.group(1)) if m else int(fallback.get(dim, 0))
     return out
 
 class AgentState:
