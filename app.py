@@ -1,16 +1,13 @@
-# --- LCE + 5S Decision Support Tool (Agent-ready, regex-upgraded) ---
+# --- LCE + 5S Decision Support Tool (Agent-ready, regex-upgraded, with BOM preset) ---
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.io as pio
-import requests
-import tempfile
 from openai import OpenAI
 from fpdf import FPDF
 from io import BytesIO
 from datetime import datetime
-import zlib
 import re
 import json
 
@@ -21,13 +18,15 @@ try:
 except Exception:
     PYDANTIC_AVAILABLE = False
 
+# ------------------------ App + API setup ------------------------
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 st.set_page_config(page_title="LCE + 5S Decision Support Tool", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
 st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 
-# ----- 5S Taxonomy with Technologies -----
+# ------------------------ 5S Taxonomy ------------------------
 five_s_taxonomy = {
     "Social": [
         {"desc": "No integration of social factors; minimal worker well-being consideration.", "tech": []},
@@ -66,7 +65,7 @@ five_s_taxonomy = {
     ]
 }
 
-# ----- 5S Checklists for Self-Assessment -----
+# ----- 5S Checklists -----
 five_s_checklists = {
     "Social": [
         ("Basic ergonomic training and labor law compliance", 1),
@@ -114,7 +113,7 @@ def assess_level(checks):
             return lvl - 1
     return max_level
 
-# --------------- LCE Actions Taxonomy ---------------
+# ------------------------ LCE actions ------------------------
 lce_actions_taxonomy = {
     "Product Transfer": [
         "Ideation: Identify product BOM, materials, and quality requirements.",
@@ -139,7 +138,7 @@ lce_actions_taxonomy = {
     ]
 }
 
-# --------------- Supply Chain Recommendations ---------------
+# ------------------------ Supply chain recommendations ------------------------
 supply_chain_recommendations = {
     "Product Transfer": [
         "Global and distributed sourcing focused on cost, speed, and modularity.",
@@ -172,27 +171,68 @@ supply_chain_recommendations = {
     ]
 }
 
-# === Domain "tools" and regex-based critic (Agent layer) ===
+# ------------------------ Minimal Starter BOM presets ------------------------
+BOM_LIBRARY = {}
+BOM_LIBRARY["CNC Micromachine (Velmex)"] = [
+    # Structure
+    {"Category":"Structure","Item":"Aluminum frame & table plate",
+     "Key Specs":"40×40 & 80×40 profiles (160/280/400 mm), 400×400 mm plate, 40×40 gussets",
+     "Purpose":"Rigid modular base","5S":"Safe,Smart,Social","Qty":1,"Notes":"Add leveling feet if needed"},
+    {"Category":"Fasteners","Item":"T-slot nuts & hammer-head bolts (M6/M8)",
+     "Key Specs":"For Bosch-style profiles","Purpose":"Modular joints","5S":"Safe","Qty":1,"Notes":""},
+    {"Category":"Fasteners","Item":"Assorted screws/washers/nuts",
+     "Key Specs":"#4-40, #6-32, M8×16/20/25, M11×70, washers M8, flange nuts 10.9",
+     "Purpose":"Assembly & mounting","5S":"Safe","Qty":1,"Notes":""},
 
-def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations):
-    """Ground the model with structured, non-hallucinatory context from your taxonomies."""
-    stages = [s.split(":")[0].strip() for s in selected_stages] or []
-    recs = supply_chain_recommendations.get(system_type, [])
-    lines = []
-    if recs:
-        lines.append("SUPPLY-CHAIN BEST PRACTICES:")
-        lines.extend([f"- {r}" for r in recs])
-    if stages:
-        lines.append("\nSELECTED LCE STAGES:")
-        lines.extend([f"- {s}" for s in stages])
-    lines.append("\n5S TECHNOLOGY HINTS BY CURRENT LEVEL:")
-    for dim, lvl in five_s_levels.items():
-        techs = five_s_taxonomy[dim][lvl].get("tech", [])
-        if techs:
-            lines.append(f"- {dim} (Level {lvl}): " + "; ".join(techs))
-    return "\n".join(lines)
+    # Motion
+    {"Category":"Motion","Item":"Velmex X-Slide 6\"","Key Specs":"1 mm/rev, limit switches",
+     "Purpose":"Linear axis","5S":"Smart,Sensing","Qty":2,"Notes":""},
+    {"Category":"Motion","Item":"Velmex X-Slide 4\"","Key Specs":"1 mm/rev, limit switches",
+     "Purpose":"Linear axis","5S":"Smart,Sensing","Qty":1,"Notes":""},
+    {"Category":"Motion","Item":"X-Slide base plates 160×76 mm","Key Specs":"For Velmex",
+     "Purpose":"Axis mounting","5S":"Smart","Qty":3,"Notes":""},
+    {"Category":"Motion","Item":"Stepper motors NEMA 17","Key Specs":"Matched to X-Slide lead/load",
+     "Purpose":"Axis actuation","5S":"Smart","Qty":3,"Notes":""},
 
-# --- High-signal, anchored patterns per dimension (EN + a few ES variants) ---
+    # Workholding / tooling interface
+    {"Category":"Workholding","Item":"Bench vise + clamp/lock",
+     "Key Specs":"Compact, rigid","Purpose":"Part clamping","5S":"Safe,Smart","Qty":1,"Notes":""},
+    {"Category":"Tooling","Item":"Quick-change toolpost AXA (for 1/2\" tools)",
+     "Key Specs":"AXA size","Purpose":"Fast tool changes","5S":"Smart","Qty":1,"Notes":""},
+    {"Category":"Tooling","Item":"Chuck / tailstock sets / live center (65 mm)",
+     "Key Specs":"Lathe-style support","Purpose":"Turning/fixturing","5S":"Smart","Qty":1,"Notes":""},
+
+    # Process heads (swappable)
+    {"Category":"Process Head","Item":"Blue laser module ~2 W (≈450 nm)",
+     "Key Specs":"With proper mount","Purpose":"Engraving/light cutting","5S":"Smart,Safe","Qty":1,
+     "Notes":"Requires Class-1 enclosure + door interlocks"},
+    {"Category":"Process Head","Item":"Light milling/drilling spindle",
+     "Key Specs":"Collet/chuck, suitable rpm","Purpose":"Milling/drilling","5S":"Smart","Qty":1,"Notes":""},
+    {"Category":"Process Head","Item":"Punch head",
+     "Key Specs":"Coupled to NEMA motor","Purpose":"Localized forming","5S":"Smart,Safe","Qty":1,"Notes":""},
+    {"Category":"Process Head","Item":"Food/soft extruder",
+     "Key Specs":"Press platform, auger","Purpose":"Extrusion experiments","5S":"Smart,Safe","Qty":1,"Notes":""},
+
+    # Controls (pick one architecture)
+    {"Category":"Control","Item":"Mesa 7I76E (Ethernet)","Key Specs":"Step/dir + I/O for LinuxCNC",
+     "Purpose":"Motion & I/O","5S":"Smart,Sensing,Safe","Qty":1,"Notes":"Use with G540 (Option A) or with discrete drivers (Option B)"},
+    {"Category":"Control","Item":"G540 4-axis step drive","Key Specs":"Integrated drivers",
+      "Purpose":"Stepper drives","5S":"Smart,Safe","Qty":1,"Notes":"Option A or C; remove Pololu/STSPIN if using G540"},
+    {"Category":"Control","Item":"PC + monitor/keyboard/mouse","Key Specs":"LinuxCNC host",
+     "Purpose":"HMI & planning","5S":"Smart","Qty":1,"Notes":"e.g., Lenovo M92p SFF"},
+
+    # Power & networking
+    {"Category":"Power","Item":"Two-pole thermal-magnetic breaker (≈32 A) + PSUs",
+     "Key Specs":"Proper voltage/current","Purpose":"Electrical safety & supply","5S":"Safe","Qty":1,"Notes":""},
+    {"Category":"Networking","Item":"CAT6 cable (2 m)","Key Specs":"Ethernet",
+     "Purpose":"7I76E link","5S":"Safe","Qty":1,"Notes":""},
+
+    # Tools
+    {"Category":"Tools","Item":"Tap & die set (SAE/Metric, ~86 pcs)",
+     "Key Specs":"Maintenance kit","Purpose":"Assembly/service","5S":"Smart","Qty":1,"Notes":""},
+]
+
+# ------------------------ Patterns for agentic critic ------------------------
 FIVE_S_PATTERNS = {
     "Social": [
         r"\bergonom(?:ic|ics|[íi]a)\b", r"\bhuman factors?\b",
@@ -243,12 +283,9 @@ FIVE_S_PATTERNS = {
         r"\bIEC\s?62443\b|\bNIST\s?(800-82|CSF)\b|\bindustrial cyber(security)?\b|\bintrusion detection\b|\bfirewall\b|\bzero trust\b|\bpatch management\b"
     ],
 }
-
-# Level-scaled expectations (min distinct signals required)
 REQUIRED_MATCHES_BY_LEVEL = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
 
 def find_5s_gaps(plan_text: str, target_levels: dict[str, int]) -> list[str]:
-    """Regex-based coverage check with level-scaled expectations."""
     text = plan_text or ""
     gaps = []
     for dim, target in target_levels.items():
@@ -268,7 +305,7 @@ def find_5s_gaps(plan_text: str, target_levels: dict[str, int]) -> list[str]:
             )
     return gaps
 
-# ----- Prompt builder (accepts evidence for Agent loop) -----
+# ------------------------ Prompt + context builders ------------------------
 def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role, evidence: str = ""):
     s_txt = "\n".join([f"- {dim}: Level {level}" for dim, level in five_s_levels.items()])
     lce_txt = "\n".join([f"- {stage}" for stage in lce_stages]) if lce_stages else "None selected"
@@ -414,41 +451,62 @@ Rules:
 - Keep fields concise but concrete.
 """
 
-# ----- OpenAI client (via OpenRouter) -----
-client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
+# ------------------------ Agent loop (with BOM grounding) ------------------------
+def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels,
+                             five_s_taxonomy, supply_chain_recommendations, bom_rows=None):
+    """Ground the model with structured, non-hallucinatory context from taxonomies + optional BOM."""
+    stages = [s.split(":")[0].strip() for s in selected_stages] or []
+    recs = supply_chain_recommendations.get(system_type, [])
+    lines = []
+    if recs:
+        lines.append("SUPPLY-CHAIN BEST PRACTICES:")
+        lines.extend([f"- {r}" for r in recs])
+    if stages:
+        lines.append("\nSELECTED LCE STAGES:")
+        lines.extend([f"- {s}" for s in stages])
+    lines.append("\n5S TECHNOLOGY HINTS BY CURRENT LEVEL:")
+    for dim, lvl in five_s_levels.items():
+        techs = five_s_taxonomy[dim][lvl].get("tech", [])
+        if techs:
+            lines.append(f"- {dim} (Level {lvl}): " + "; ".join(techs))
 
-# ----- Utilities -----
-def extract_expected_5s_levels(text, five_s_list, fallback=None):
-    result = {}
-    max_levels = {dim: len(five_s_taxonomy[dim])-1 for dim in five_s_list}
-    for dim in five_s_list:
-        pattern = rf"{dim}\s*:?\s*(?:[Ll]evel\s*)?(\d+)"
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            val = int(m.group(1))
-        else:
-            pattern2 = rf"{dim}.{{0,20}}?(\d+)"
-            m2 = re.search(pattern2, text, re.IGNORECASE)
-            if m2:
-                val = int(m2.group(1))
-            else:
-                val = fallback[dim] if fallback and dim in fallback else 0
-        result[dim] = max(min(val, max_levels[dim]), 0)
-    return result
+    # BOM grounding
+    if bom_rows:
+        lines.append("\nBOM SUMMARY (selected items):")
+        items = []
+        for r in bom_rows:
+            it = r.get("Item", "")
+            cat = r.get("Category", "")
+            q  = r.get("Qty", "")
+            if it:
+                items.append(f"- [{cat}] {it} x{q}")
+        if items:
+            lines.extend(items)
 
-# ----- Agent loop (ReAct-lite) -----
+        names = [str(r.get("Item","")).lower() for r in bom_rows]
+        has_7i76e  = any("7i76e" in n for n in names)
+        has_g540   = any("g540" in n for n in names)
+        has_pololu = any("pololu" in n for n in names)
+        has_stspin = any("stspin" in n for n in names)
+        has_laser  = any("laser" in n for n in names)
+
+        if has_7i76e and has_g540:
+            lines.append("\nCONTROL ARCH HINT: Use 7I76E → G540 (step/dir).")
+        if (has_pololu or has_stspin) and has_g540:
+            lines.append("POTENTIAL CONFLICT: Pololu/STSPIN are redundant if G540 is used. Remove to simplify.")
+        if has_laser:
+            lines.append("SAFETY NOTE: Laser head requires Class-1 enclosure and door interlocks (IEC 60825).")
+
+    return "\n".join(lines)
+
 def agent_generate_plan(system_type, industry, selected_stages, five_s_levels, objective, final_role,
-                        max_steps=3, temperature=0.2, seed=42):
-    """
-    Agent loop:
-      1) Retrieve domain evidence from local taxonomies
-      2) Generate plan with LLM
-      3) Regex critic checks 5S coverage -> feed findings as evidence
-    """
-    evidence = retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations)
+                        max_steps=3, temperature=0.2, seed=42, bom_rows=None):
+    """Agent loop: evidence -> plan -> regex critic -> refine."""
+    evidence = retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels,
+                                        five_s_taxonomy, supply_chain_recommendations, bom_rows=bom_rows)
     last_plan = ""
 
-    for step in range(max_steps):
+    for _ in range(max_steps):
         prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role, evidence=evidence)
         plan_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
@@ -474,9 +532,9 @@ def agent_generate_plan(system_type, industry, selected_stages, five_s_levels, o
 
     return last_plan
 
-# ---------------------- UI ----------------------
+# ------------------------ UI ------------------------
 
-# --- Step 1: Define Objective, Industry, and Role ---
+# Step 1: Objective, Industry, Role
 st.header("1. Define Your Manufacturing Objective")
 objective = st.text_input(
     "Describe your main goal (e.g., launch new product, adopt new technology, expand facility):",
@@ -501,13 +559,13 @@ else:
     final_role = role_selected
 st.session_state["role_idx"] = role_options.index(role_selected)
 
-# --- Step 2: Select Manufacturing System Type ---
+# Step 2: System type
 st.header("2. Select Manufacturing System Type")
 system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
 system_type = st.radio("Choose a system type:", system_types, key="system_type")
 st.markdown(f"**Selected system type:** {system_type}")
 
-# --- Step 3: Select LCE Stage Activities ---
+# Step 3: LCE stages
 st.header("3. Select Relevant LCE Stages/Actions")
 lce_global_keys = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life"]
 if "lce_global_checked" not in st.session_state:
@@ -524,7 +582,7 @@ for i, action in enumerate(lce_actions):
         selected_stages.append(action)
 st.session_state["selected_stages"] = selected_stages
 
-# --- Step 4: 5S Maturity Assessment ---
+# Step 4: 5S maturity
 st.header("4. Assess 5S Maturity (Single Option for Each S)")
 five_s_levels = {}
 cols = st.columns(5)
@@ -546,7 +604,7 @@ for i, dim in enumerate(five_s_taxonomy):
                 st.write(f"- {t}")
 st.session_state["five_s_levels"] = five_s_levels
 
-# --- Styles ---
+# Styles
 st.markdown("""
     <style>
     div.stButton > button:first-child {
@@ -566,9 +624,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Agent-backed Plan Generation ---
+# Step 5: Minimal Starter BOM (before plan generation so it can ground the agent)
+st.header("5. Minimal Starter BOM")
+if "bom_df" not in st.session_state:
+    st.session_state["bom_df"] = pd.DataFrame()
+
+preset_names = list(BOM_LIBRARY.keys())
+preset = st.selectbox("Choose a BOM preset:", preset_names, index=0, key="bom_preset")
+bom_df = pd.DataFrame(BOM_LIBRARY[preset])
+if "Include" not in bom_df.columns:
+    bom_df.insert(0, "Include", True)
+
+st.caption("Tip: uncheck **Include** to drop a line; you can edit any cell inline.")
+edited_bom = st.data_editor(
+    bom_df,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="bom_editor"
+)
+included_bom = edited_bom[edited_bom["Include"] == True].copy()
+st.session_state["bom_df"] = included_bom
+
+if not included_bom.empty:
+    with st.expander("BOM summary by category"):
+        st.write(included_bom.groupby("Category").size().rename("Count"))
+    csv_bytes = included_bom.to_csv(index=False).encode("utf-8")
+    st.download_button("Download BOM as CSV", data=csv_bytes, file_name="bom_selected.csv", mime="text/csv")
+
+# Step 6: Agent-backed Plan Generation
 if st.button("Generate Plan and Recommendations"):
     with st.spinner("Consulting the Agent for plan and recommendations..."):
+        bom_rows = None
+        if "bom_df" in st.session_state and not st.session_state["bom_df"].empty:
+            bom_rows = st.session_state["bom_df"].to_dict("records")
+
         llm_response = agent_generate_plan(
             system_type=system_type,
             industry=industry,
@@ -576,7 +665,8 @@ if st.button("Generate Plan and Recommendations"):
             five_s_levels=five_s_levels,
             objective=objective,
             final_role=final_role,
-            max_steps=3, temperature=0.2, seed=42
+            max_steps=3, temperature=0.2, seed=42,
+            bom_rows=bom_rows,   # <<< BOM grounding
         )
         st.session_state["llm_response"] = llm_response
 
@@ -621,7 +711,7 @@ if st.button("Generate Plan and Recommendations"):
         else:
             st.session_state["expected_5s"] = five_s_levels.copy()
 
-        # Build context for stage views
+        # Stage views JSON call
         plan_text = st.session_state.get("supply_chain_section", "")
         context_block = build_context_block(
             objective=objective,
@@ -631,8 +721,6 @@ if st.button("Generate Plan and Recommendations"):
             selected_stages=selected_stages,
             plan_text=plan_text
         )
-
-        # Stage views JSON call
         stage_views_prompt = build_stage_views_prompt_json(context_block, selected_stages)
         with st.spinner("Consulting LLM for stage views..."):
             stage_views_completion = client.chat.completions.create(
@@ -656,9 +744,9 @@ if st.button("Generate Plan and Recommendations"):
 
         st.session_state["stage_views"] = stage_views
 
-# --- Display Sections (if present) ---
+# Step 7: Display Sections (if present)
 if "supply_chain_section" in st.session_state:
-    st.header("5. Supply Chain Configuration & Action Plan")
+    st.header("7. Supply Chain Configuration & Action Plan")
     st.markdown(f"**System Type:** {system_type}")
 
     displayed_stages = st.session_state.get("selected_stages", [])
@@ -712,8 +800,8 @@ if "supply_chain_section" in st.session_state:
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
 
-    # Step 6 summaries
-    st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
+    # Step 8 summaries
+    st.header("8. LLM Advisor: Improvement Opportunities & Digital Next Steps")
     st.subheader("Supply Chain Configuration & Action Plan")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
     st.subheader("Improvement Opportunities & Risks")
@@ -721,8 +809,8 @@ if "supply_chain_section" in st.session_state:
     st.subheader("Digital/AI Next Steps")
     st.info(st.session_state.get("ai_section", "No digital/AI next steps provided."))
 
-# --- 5S Radar Charts ---
-st.header("Current 5S Profile")
+# Step 9: 5S Radar Charts
+st.header("9. 5S Profiles")
 radar_df = pd.DataFrame({
     "Dimension": list(five_s_taxonomy.keys()),
     "Level": [five_s_levels[s] for s in five_s_taxonomy]
@@ -731,7 +819,7 @@ radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=Tru
 st.plotly_chart(radar_fig, use_container_width=True, key="current_5s_profile")
 
 if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five_s_levels:
-    st.header("Expected 5S Profile After Improvements")
+    st.subheader("Expected 5S Profile After Improvements")
     expected_radar_df = pd.DataFrame({
         "Dimension": list(five_s_taxonomy.keys()),
         "Level": [st.session_state["expected_5s"][s] for s in five_s_taxonomy]
@@ -739,11 +827,11 @@ if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five
     expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
     st.plotly_chart(expected_radar_fig, use_container_width=True, key="expected_5s_profile")
 
-# --- Step 7: Project Chat Assistant ---
+# Step 10: Project Chat Assistant
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
-st.header("7. Ask the Project LLM Assistant")
+st.header("10. Ask the Project LLM Assistant")
 st.markdown("Type your questions about this manufacturing system scenario, supply chain, or digital strategy.")
 user_question = st.text_input("Ask the LLM Assistant (project-specific questions only):", key="user_project_chat")
 
@@ -786,7 +874,7 @@ if st.session_state["chat_history"]:
         elif entry["role"] == "assistant":
             st.markdown(f"**Assistant:** {entry['content']}")
 
-# --- PDF export ---
+# ------------------------ PDF export ------------------------
 def to_latin1(text):
     if not isinstance(text, str):
         text = str(text)
@@ -812,15 +900,27 @@ def generate_pdf_report():
     five_s_lvls = st.session_state.get("five_s_levels", {})
     pdf.multi_cell(0, 8, to_latin1(f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_lvls.items()])}"))
 
+    # Selected BOM
+    bom_df_pdf = st.session_state.get("bom_df")
+    if isinstance(bom_df_pdf, pd.DataFrame) and not bom_df_pdf.empty:
+        pdf.ln(6)
+        pdf.set_font("Arial", "B", size=12)
+        pdf.cell(0, 10, to_latin1("Selected Bill of Materials (BOM)"), ln=True)
+        pdf.set_font("Arial", size=11)
+        for _, row in bom_df_pdf.iterrows():
+            line = f"- [{row.get('Category','')}] {row.get('Item','')} x{row.get('Qty','')}"
+            pdf.multi_cell(0, 7, to_latin1(line[:200]))
+
+    # 5S charts note
     if five_s_lvls:
-        pdf.cell(0, 10, "Current 5S Profile: (see radar chart in the web app)", ln=True)
-        pdf.ln(10)
+        pdf.ln(4)
+        pdf.cell(0, 8, to_latin1("Note: See 5S radar charts in the app."), ln=True)
 
     expected_5s = st.session_state.get("expected_5s", {})
     if expected_5s and expected_5s != five_s_lvls:
-        pdf.cell(0, 10, "Expected 5S After Improvement: (see radar chart in the web app)", ln=True)
-        pdf.ln(10)
+        pdf.cell(0, 8, to_latin1("Note: See 'Expected 5S' radar chart in the app."), ln=True)
 
+    # LLM Results
     pdf.ln(6)
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, "LLM Results", ln=True)
@@ -829,6 +929,7 @@ def generate_pdf_report():
     pdf.multi_cell(0, 8, to_latin1(f"Improvement Opportunities & Risks:\n{st.session_state.get('improvement_section', '')}\n"))
     pdf.multi_cell(0, 8, to_latin1(f"Digital/AI Next Steps:\n{st.session_state.get('ai_section', '')}\n"))
 
+    # Conversation history
     pdf.ln(6)
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, "Conversation History", ln=True)
