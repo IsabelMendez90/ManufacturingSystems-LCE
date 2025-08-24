@@ -452,8 +452,12 @@ if st.button("Generate Plan and Recommendations"):
     # 1. Get the PLAN from LLM
     prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role)
     with st.spinner("Consulting LLM for plan and recommendations..."):
+        temp = 0.2
+        seed = 42
         plan_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
+            temperature = temp,
+            seed = seed,
             messages=[
                 {"role": "system", "content": "You are a digital manufacturing systems expert."},
                 {"role": "user", "content": prompt}
@@ -478,8 +482,6 @@ if st.button("Generate Plan and Recommendations"):
             selected_stages=selected_stages,
             plan_text=plan_text
         )
-
-
         st.session_state["improvement_section"] = imp_match.group(1).strip() if imp_match else ""
         st.session_state["ai_section"] = ai_match.group(1).strip() if ai_match else ""
 
@@ -498,8 +500,12 @@ if st.button("Generate Plan and Recommendations"):
     # 2. Get the STAGE VIEWS from LLM (JSON, with full context)
     stage_views_prompt = build_stage_views_prompt_json(context_block, selected_stages)
     with st.spinner("Consulting LLM for stage views..."):
+        temp = 0.2
+        seed = 42
         stage_views_completion = client.chat.completions.create(
             model="mistralai/mistral-7b-instruct",
+            temperature = temp,
+            seed = seed,
             messages=[
                 {"role": "system", "content": "You are a digital manufacturing systems expert."},
                 {"role": "user", "content": stage_views_prompt}
