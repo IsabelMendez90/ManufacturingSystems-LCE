@@ -1,4 +1,4 @@
-# --- LCE + 5S Decision Support (Agentic, no-BOM edition) ---
+# --- LCE + 5S Decision Support ---
 # Planner → Tools → Reflector loop with standards gate, capacity sizing, doc-intake, risk register
 
 import streamlit as st
