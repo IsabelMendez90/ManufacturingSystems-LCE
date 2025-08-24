@@ -542,12 +542,17 @@ if res:
     curr_df = pd.DataFrame({"Dimension": list(five_s_levels.keys()), "Level":[five_s_levels[k] for k in five_s_levels]})
     fig_curr = px.line_polar(curr_df, r="Level", theta="Dimension", line_close=True, range_r=[0,4])
     st.plotly_chart(fig_curr, use_container_width=True)
-    if expected_5s != five_s_levels:
-        exp_df = pd.DataFrame({"Dimension": list(expected_5s.keys()), "Level":[expected_5s[k] for k in expected_5s]})
-        fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension", line_close=True)
+    if expected_5s:
+        exp_df = pd.DataFrame({
+            "Dimension": list(expected_5s.keys()),
+            "Level": [expected_5s[k] for k in expected_5s]
+        })
+        exp_df["Level"] = pd.to_numeric(exp_df["Level"], errors="coerce").fillna(0).clip(0, 4)
+        fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension",
+                                line_close=True, range_r=[0, 4])
         st.plotly_chart(fig_exp, use_container_width=True)
 
-    # ---- Patch A: Show capacity results clearly in the UI
+    # ---- Show capacity results clearly in the UI
     st.header("8a) Capacity Sizing (from demand inputs)")
     cap = res.get("capacity", {})
     if cap and cap.get("takt_sec") is not None:
