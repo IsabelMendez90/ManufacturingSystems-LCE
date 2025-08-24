@@ -1,4 +1,4 @@
-# --- LCE + 5S Decision Support Tool (Agent-ready, integrated) ---
+# --- LCE + 5S Decision Support Tool (Agent-ready, regex-upgraded) ---
 
 import streamlit as st
 import pandas as pd
@@ -172,7 +172,7 @@ supply_chain_recommendations = {
     ]
 }
 
-# === Domain "tools" and simple critic (Agent layer) ===
+# === Domain "tools" and regex-based critic (Agent layer) ===
 
 def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations):
     """Ground the model with structured, non-hallucinatory context from your taxonomies."""
@@ -192,28 +192,83 @@ def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_leve
             lines.append(f"- {dim} (Level {lvl}): " + "; ".join(techs))
     return "\n".join(lines)
 
-FIVE_S_KEYWORDS = {
-    "Social":      ["ergonom", "fatigue", "inclusion", "well-being", "workforce", "lms"],
-    "Sustainable": ["lca", "carbon", "recycl", "renewable", "esg", "energy", "water"],
-    "Sensing":     ["sensor", "scada", "opc", "mqtt", "daq", "wsn", "iot", "edge"],
-    "Smart":       ["plc", "pid", "mes", "predictive", "ml", "digital twin", "oee"],
-    "Safe":        ["iso 45001", "interlock", "light curtain", "hse", "hazard", "cyber"]
+# --- High-signal, anchored patterns per dimension (EN + a few ES variants) ---
+FIVE_S_PATTERNS = {
+    "Social": [
+        r"\bergonom(?:ic|ics|[íi]a)\b", r"\bhuman factors?\b",
+        r"\bDEI\b|\bdiversity\b|\bequity\b|\binclusion\b|\binclusi[oó]n\b",
+        r"\bpsychological safety\b", r"\bfatigue (monitoring|management)|\bfatiga\b",
+        r"\bwearables?\b|\bexoskeletons?\b", r"\bLMS\b|\blearning management\b",
+        r"\btraining\b|\bupskilling\b|\breskilling\b", r"\bparticipatory\b|\bco-creation\b",
+        r"\bworker[- ]centric\b|\bworkforce\b", r"\bshift scheduling\b|\bjob rotation\b"
+    ],
+    "Sustainable": [
+        r"\bLCA\b|\blife[- ]cycle assessment\b|\bACV\b|\ban[áa]lisis de ciclo de vida\b",
+        r"\bISO\s?14001\b|\bISO\s?50001\b|\bGHG\b", r"\bScope\s?[123]\b",
+        r"\bcarbon (footprint|accounting|intensity)\b|\bhuella de carbono\b",
+        r"\bcircular economy\b|\beconom[ií]a circular\b|\bremanufactur",
+        r"\brecycle|\brecycl|\breuse|\breutiliz|\bclosed[- ]loop\b|\bcerrado\b",
+        r"\brenewable\b|\bPPA\b|\bRECs?\b|\benerg[ií]a renovable\b",
+        r"\benergy (audit|efficiency|management)\b|\bwaste heat recovery\b",
+        r"\bwater (reuse|recycling|ZLD)\b|\breuso de agua\b|\bZLD\b",
+        r"\bESG\b|\bEPD\b|\bcarbon neutrality\b"
+    ],
+    "Sensing": [
+        r"\bSCADA\b", r"\bOPC[-\s]?UA\b|\bMQTT\b|\bModbus\b|\bTSN\b",
+        r"\bhistorian\b|\bPI System\b", r"\bRFID\b|\bbarcode\b|\bRTLS\b",
+        r"\bcomputer vision\b|\bcameras?\b", r"\bDAQ\b|\bdata acquisition\b",
+        r"\bWSN\b|\bwireless sensor network\b", r"\bedge (device|gateway|computing)\b",
+        r"\bIIoT\b|\bindustrial IoT\b", r"\bsensor fusion\b|\bcalibration\b",
+        r"\bcondition monitoring\b|\bvibration\b|\bthermocouple\b"
+    ],
+    "Smart": [
+        r"\bPLC\b|\bDCS\b", r"\bISA[- ]?(95|88)\b",
+        r"\bMES\b|\bMOM\b", r"\bAPS\b|\badvanced planning\b",
+        r"\bSPC\b|\bAPC\b|\bOEE\b",
+        r"\bpredictive maintenance\b|\banomaly detection\b|\bsoft sensors?\b",
+        r"\bdigital twins?\b|\bdigital thread\b",
+        r"\boptimization\b|\bMILP\b|\bCP-?SAT\b|\bscheduling\b",
+        r"\b(machine learning|ML)\b|\breinforcement learning\b",
+        r"\bAGVs?\b|\bAMRs?\b|\bcobots?\b",
+        r"\bknowledge graph\b|\brules engine\b"
+    ],
+    "Safe": [
+        r"\bISO\s?45001\b",
+        r"\bIEC\s?61508\b|\bIEC\s?62061\b|\bISO\s?13849\b",
+        r"\bSIL\b(?:\s?(2|3))?|\bPL\b[cd]?\b|\bfunctional safety\b",
+        r"\brisk assessment\b|\bFMEA\b|\bHAZOP\b|\bLOPA\b",
+        r"\bLOTO\b|\blockout[- ]tagout\b",
+        r"\bsafety PLC\b|\bsafety relay\b|\blight curtain\b|\binterlock\b|\bE-?Stop\b",
+        r"\bHSE\b|\bnear[- ]miss\b|\bincident\b",
+        r"\bIEC\s?62443\b|\bNIST\s?(800-82|CSF)\b|\bindustrial cyber(security)?\b|\bintrusion detection\b|\bfirewall\b|\bzero trust\b|\bpatch management\b"
+    ],
 }
 
-def find_5s_gaps(plan_text, target_levels):
-    """Heuristic: for each S target > 0, expect at least one domain keyword present."""
-    text = (plan_text or "").lower()
+# Level-scaled expectations (min distinct signals required)
+REQUIRED_MATCHES_BY_LEVEL = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+
+def find_5s_gaps(plan_text: str, target_levels: dict[str, int]) -> list[str]:
+    """Regex-based coverage check with level-scaled expectations."""
+    text = plan_text or ""
     gaps = []
     for dim, target in target_levels.items():
         if target <= 0:
             continue
-        required = FIVE_S_KEYWORDS.get(dim, [])
-        if not any(k in text for k in required):
-            gaps.append(f"{dim}: target Level {target} but no concrete signals found "
-                        f"(expected terms like: {', '.join(required[:5])}...)")
+        pats = FIVE_S_PATTERNS.get(dim, [])
+        hits = set()
+        for p in pats:
+            if re.search(p, text, flags=re.IGNORECASE):
+                hits.add(p)
+        need = REQUIRED_MATCHES_BY_LEVEL.get(target, 1)
+        if len(hits) < need:
+            readable = [re.sub(r"\\b", "", p).replace("(?:", "(") for p in list(pats)[:6]]
+            gaps.append(
+                f"{dim}: target Level {target} requires ≥{need} concrete signals; "
+                f"found {len(hits)}. Add specifics like: {', '.join(readable)}"
+            )
     return gaps
 
-# ----- Prompt builder (now accepts evidence for Agent loop) -----
+# ----- Prompt builder (accepts evidence for Agent loop) -----
 def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role, evidence: str = ""):
     s_txt = "\n".join([f"- {dim}: Level {level}" for dim, level in five_s_levels.items()])
     lce_txt = "\n".join([f"- {stage}" for stage in lce_stages]) if lce_stages else "None selected"
@@ -388,7 +443,7 @@ def agent_generate_plan(system_type, industry, selected_stages, five_s_levels, o
     Agent loop:
       1) Retrieve domain evidence from local taxonomies
       2) Generate plan with LLM
-      3) Critic checks 5S coverage -> feed findings as evidence
+      3) Regex critic checks 5S coverage -> feed findings as evidence
     """
     evidence = retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations)
     last_plan = ""
@@ -511,7 +566,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Agent-backed Plan Generation (replaces single-shot call) ---
+# --- Agent-backed Plan Generation ---
 if st.button("Generate Plan and Recommendations"):
     with st.spinner("Consulting the Agent for plan and recommendations..."):
         llm_response = agent_generate_plan(
