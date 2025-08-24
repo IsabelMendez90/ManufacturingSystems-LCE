@@ -1,3 +1,5 @@
+# --- LCE + 5S Decision Support Tool (Agent-ready, integrated) ---
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,13 +11,22 @@ from fpdf import FPDF
 from io import BytesIO
 from datetime import datetime
 import zlib
-
 import re
+import json
+
+# Optional schema validation
+try:
+    from pydantic import BaseModel, ValidationError
+    PYDANTIC_AVAILABLE = True
+except Exception:
+    PYDANTIC_AVAILABLE = False
 
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
+
 st.set_page_config(page_title="LCE + 5S Decision Support Tool", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
 st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
+
 # ----- 5S Taxonomy with Technologies -----
 five_s_taxonomy = {
     "Social": [
@@ -54,7 +65,6 @@ five_s_taxonomy = {
         {"desc": "AI-powered safety management with cyber-physical protection, incident prediction, and adaptive control systems.", "tech": ["Digital twins for safety", "AI-driven hazard detection", "Cybersecurity software (Darktrace, Fortinet)"]}
     ]
 }
-
 
 # ----- 5S Checklists for Self-Assessment -----
 five_s_checklists = {
@@ -103,6 +113,7 @@ def assess_level(checks):
         if lvl not in levels_checked:
             return lvl - 1
     return max_level
+
 # --------------- LCE Actions Taxonomy ---------------
 lce_actions_taxonomy = {
     "Product Transfer": [
@@ -161,12 +172,51 @@ supply_chain_recommendations = {
     ]
 }
 
-def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role):
-    # Convert 5S levels to readable text
+# === Domain "tools" and simple critic (Agent layer) ===
+
+def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations):
+    """Ground the model with structured, non-hallucinatory context from your taxonomies."""
+    stages = [s.split(":")[0].strip() for s in selected_stages] or []
+    recs = supply_chain_recommendations.get(system_type, [])
+    lines = []
+    if recs:
+        lines.append("SUPPLY-CHAIN BEST PRACTICES:")
+        lines.extend([f"- {r}" for r in recs])
+    if stages:
+        lines.append("\nSELECTED LCE STAGES:")
+        lines.extend([f"- {s}" for s in stages])
+    lines.append("\n5S TECHNOLOGY HINTS BY CURRENT LEVEL:")
+    for dim, lvl in five_s_levels.items():
+        techs = five_s_taxonomy[dim][lvl].get("tech", [])
+        if techs:
+            lines.append(f"- {dim} (Level {lvl}): " + "; ".join(techs))
+    return "\n".join(lines)
+
+FIVE_S_KEYWORDS = {
+    "Social":      ["ergonom", "fatigue", "inclusion", "well-being", "workforce", "lms"],
+    "Sustainable": ["lca", "carbon", "recycl", "renewable", "esg", "energy", "water"],
+    "Sensing":     ["sensor", "scada", "opc", "mqtt", "daq", "wsn", "iot", "edge"],
+    "Smart":       ["plc", "pid", "mes", "predictive", "ml", "digital twin", "oee"],
+    "Safe":        ["iso 45001", "interlock", "light curtain", "hse", "hazard", "cyber"]
+}
+
+def find_5s_gaps(plan_text, target_levels):
+    """Heuristic: for each S target > 0, expect at least one domain keyword present."""
+    text = (plan_text or "").lower()
+    gaps = []
+    for dim, target in target_levels.items():
+        if target <= 0:
+            continue
+        required = FIVE_S_KEYWORDS.get(dim, [])
+        if not any(k in text for k in required):
+            gaps.append(f"{dim}: target Level {target} but no concrete signals found "
+                        f"(expected terms like: {', '.join(required[:5])}...)")
+    return gaps
+
+# ----- Prompt builder (now accepts evidence for Agent loop) -----
+def build_llm_prompt(system_type, industry, lce_stages, five_s_levels, objective, user_role, evidence: str = ""):
     s_txt = "\n".join([f"- {dim}: Level {level}" for dim, level in five_s_levels.items()])
     lce_txt = "\n".join([f"- {stage}" for stage in lce_stages]) if lce_stages else "None selected"
-    
-    # Get supply chain recommendations for this system type
     sc_recs = supply_chain_recommendations.get(system_type, [])
     sc_recs_txt = "\n".join([f"- {rec}" for rec in sc_recs])
 
@@ -178,18 +228,15 @@ IMPORTANT INSTRUCTIONS:
 - Only provide answers that are directly related to manufacturing systems, supply chain management, LCE (Lifecycle Engineering), and 5S within this scenario.
 - **Never make up facts or invent data**. If information is not available, say so clearly.
 - Do **not** express personal opinions or preferences.
-- If the user asks questions unrelated to this scenario (e.g., 'how to go to Mars', 'what is your favorite color'), politely reply:  
-  "**I'm sorry, but this digital assistant only provides advice on manufacturing system and supply chain design based on the LCE and 5S framework.**"
-- If the user asks "Who created you?", "Who built you?", "Who developed you?", or any similar question about your creation or origin, always reply:  
-  "**I am a Large Language Model assistant tailored by Dr. Juana Isabel Méndez and Dr. Arturo Molina for strategic guidance in manufacturing systems and supply chain design using LCE and 5S principles.**"
+- If the user asks questions unrelated to this scenario, reply: "**I'm sorry, but this digital assistant only provides advice on manufacturing system and supply chain design based on the LCE and 5S framework.**"
+- If asked about your origin: "**I am a Large Language Model assistant tailored by Dr. Juana Isabel Méndez and Dr. Arturo Molina for strategic guidance in manufacturing systems and supply chain design using LCE and 5S principles.**"
 - Base all recommendations on real industry standards and on the context provided below.
 - Keep your responses concise, precise, and actionable.
-- Never respond to topics outside this scope.
 
 The company's stated objective is:
 {objective}
 
-The user's role is: 
+The user's role is:
 {user_role}
 
 Current LCE stages/actions:
@@ -198,25 +245,31 @@ Current LCE stages/actions:
 5S maturity levels:
 {s_txt}
 
-When designing the supply chain configuration and action plan, use the following best practices as a starting point, and adapt them as needed to the user's objective, selected LCE stages, and 5S maturity:
+When designing the supply chain configuration and action plan, use the following best practices as a starting point, and adapt them to the user's objective, selected LCE stages, and 5S maturity:
 {sc_recs_txt}
 
 Please respond in the following format:
 
 [Supply Chain Configuration & Action Plan]
-(Provide a concise supply chain configuration and action plan tailored to the above scenario, always employ real standards, integrating LCE, 5S, and supply chain management. Reference/adapt the listed best practices where relevant.)
+(Provide a concise supply chain configuration and action plan tailored to the above scenario, employing real standards, integrating LCE, 5S, and supply chain management.)
 
 [Improvement Opportunities & Risks]
-(Identify the main improvement opportunities and risks for this configuration, considering the user's objective.)
+(Identify the main improvement opportunities and risks for this configuration.)
 
 [Digital/AI Next Steps]
-(Recommend concrete next steps and digital/AI technologies, drawn from each S in the 5S taxonomy cross referenced with the LCE, to help progress toward Industry 5.0 and the goal.)
+(Recommend concrete next steps and digital/AI technologies, drawn from each S in the 5S taxonomy cross referenced with the LCE.)
 
 [Expected 5S Maturity]
-(For each S, suggest the most likely maturity level (0–4) expected after implementing the recommended improvement opportunities and digital next steps. List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)
+(For each S, suggest the most likely maturity level (0–4) expected after implementing the recommended improvements. List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)
+"""
+    if evidence:
+        prompt += f"""
+
+[ADDITIONAL EVIDENCE — DO NOT IGNORE]
+Use and cite these constraints, hints, and best practices when constructing the plan:
+{evidence}
 """
     return prompt
-
 
 def build_context_block(objective, system_type, industry, five_s_levels, selected_stages, plan_text=""):
     stages_list = [s.split(":")[0].strip() for s in selected_stages]
@@ -232,93 +285,8 @@ Recent plan (if any):
 {plan_text}
 """
 
-# ========== Streamlit App Layout ==========
-
-# --- Step 1: Define Objective, Industry, and Role ---
-st.header("1. Define Your Manufacturing Objective")
-objective = st.text_input( "Describe your main goal (e.g., launch new product, adopt new technology, expand facility):", value=st.session_state.get("objective", "Automate assembly of micro-machine cells."), key="objective")
-industry = st.selectbox( "Select your industry:", ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"], index=st.session_state.get("industry_idx", 0), key="industry")
-st.session_state["industry_idx"] = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"].index(industry)
-role_options = ["Design Engineer", "Process Engineer", "Manufacturing Engineer", "Safety Supervisor","Sustainability Manager", "Supply Chain Analyst", "Manager/Decision Maker", "Other"]
-role_selected = st.selectbox("Select your role:", role_options,index=st.session_state.get("role_idx", 2), key="user_role")
-if role_selected == "Other":
-    custom_role = st.text_input(
-        "Please specify your role:",
-        value=st.session_state.get("custom_role", ""),
-        key="custom_role"
-    )
-    final_role = custom_role if custom_role else "Other"
-    st.session_state["custom_role"] = custom_role
-else:
-    final_role = role_selected
-st.session_state["role_idx"] = role_options.index(role_selected)
-
-# --- Step 2: Select Manufacturing System Type ---
-st.header("2. Select Manufacturing System Type")
-system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
-system_type = st.radio("Choose a system type:", system_types, key="system_type")
-st.markdown(f"**Selected system type:** {system_type}")
-
-# --- Step 3: Select LCE Stage Activities (Checkboxes, global selection) ---
-st.header("3. Select Relevant LCE Stages/Actions")
-lce_global_keys = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life"]
-
-
-if "lce_global_checked" not in st.session_state:
-    st.session_state["lce_global_checked"] = [False] * len(lce_global_keys)
-
-lce_actions = lce_actions_taxonomy[system_type]
-selected_stages = []
-
-for i, action in enumerate(lce_actions):
-
-    action_key = action.split(":")[0].strip()
-    idx = lce_global_keys.index(action_key)
-    checked = st.checkbox(
-        action,
-        value=st.session_state["lce_global_checked"][idx],
-        key=f"lce_global_{i}"
-    )
-
-    st.session_state["lce_global_checked"][idx] = checked
-    if checked:
-        selected_stages.append(action)
-
-st.session_state["selected_stages"] = selected_stages
-
-# --- Step 4: 5S Maturity Assessment (Radio Buttons, not Checkboxes) ---
-st.header("4. Assess 5S Maturity (Single Option for Each S)")
-five_s_levels = {}
-cols = st.columns(5)
-for i, dim in enumerate(five_s_taxonomy):
-    with cols[i]:
-        st.subheader(dim)
-        options = []
-        for idx, lvl in enumerate(five_s_taxonomy[dim]):
-            label = f"Level {idx}: {lvl['desc']}"
-            options.append(label)
-        level = st.radio(
-            f"Select the most accurate description for {dim}:",
-            options,
-            index=0,
-            key=f"{dim}_radio"
-        )
-        level_idx = options.index(level)
-        five_s_levels[dim] = level_idx
-        st.markdown(f"**Level assigned:** {level_idx}")
-        st.markdown(f"_{five_s_taxonomy[dim][level_idx]['desc']}_")
-        techs = five_s_taxonomy[dim][level_idx].get('tech', [])
-        if techs:
-            st.markdown("**Technologies & Tools:**")
-            for t in techs:
-                st.write(f"- {t}")
-st.session_state["five_s_levels"] = five_s_levels
-
-
-import json
-
+# ----- Stage Views helpers -----
 def parse_stage_views_json(llm_response, selected_stages):
-    # Grab the JSON object from the reply (in case there is stray text)
     m = re.search(r"\{.*\}", llm_response, flags=re.DOTALL)
     payload = m.group(0) if m else llm_response
     data = json.loads(payload)
@@ -341,11 +309,9 @@ def parse_stage_views_json(llm_response, selected_stages):
     return out
 
 def parse_stage_views_from_plan(plan_text, selected_stages):
-    # tolerant extractor from the plan text you already have
     stage_keys = [s.split(":")[0].strip() for s in selected_stages]
     out = {k: {"Function":"","Organization":"","Information":"","Resource":"","Performance":""} for k in stage_keys}
 
-    # Split by stage headers like 'Ideation:' or '[Ideation]'
     union = "|".join(re.escape(k) for k in stage_keys)
     parts = re.split(rf"(?:^\[({union})\]\s*|^({union})\s*:)", plan_text, flags=re.MULTILINE)
     i = 1
@@ -362,9 +328,7 @@ def parse_stage_views_from_plan(plan_text, selected_stages):
             out[name]["Resource"]     = grab("Resource")
             out[name]["Performance"]  = grab("Performance")
         i += 3
-
     return out
-
 
 def build_stage_views_prompt_json(context_block, selected_stages):
     stages = [s.split(":")[0].strip() for s in selected_stages]
@@ -395,38 +359,139 @@ Rules:
 - Keep fields concise but concrete.
 """
 
+# ----- OpenAI client (via OpenRouter) -----
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
-
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=API_KEY)
-
+# ----- Utilities -----
 def extract_expected_5s_levels(text, five_s_list, fallback=None):
-    """
-    Extracts expected 5S levels from free text using robust pattern matching.
-    Returns a dict: {dimension: int level} — values always clamped to [0, max_level]
-    """
     result = {}
-    max_levels = {dim: len(five_s_taxonomy[dim])-1 for dim in five_s_list}  # max level per S
+    max_levels = {dim: len(five_s_taxonomy[dim])-1 for dim in five_s_list}
     for dim in five_s_list:
-        # Regex: dimension, optional colon, optional "level", optional spaces, digit
         pattern = rf"{dim}\s*:?\s*(?:[Ll]evel\s*)?(\d+)"
         m = re.search(pattern, text, re.IGNORECASE)
         if m:
             val = int(m.group(1))
         else:
-            # Try a more tolerant match: find any digit after the dimension within 20 chars
             pattern2 = rf"{dim}.{{0,20}}?(\d+)"
             m2 = re.search(pattern2, text, re.IGNORECASE)
             if m2:
                 val = int(m2.group(1))
             else:
                 val = fallback[dim] if fallback and dim in fallback else 0
-        # Clamp value to allowed range for each S
-        minval, maxval = 0, max_levels[dim]
-        result[dim] = max(min(val, maxval), minval)
+        result[dim] = max(min(val, max_levels[dim]), 0)
     return result
 
+# ----- Agent loop (ReAct-lite) -----
+def agent_generate_plan(system_type, industry, selected_stages, five_s_levels, objective, final_role,
+                        max_steps=3, temperature=0.2, seed=42):
+    """
+    Agent loop:
+      1) Retrieve domain evidence from local taxonomies
+      2) Generate plan with LLM
+      3) Critic checks 5S coverage -> feed findings as evidence
+    """
+    evidence = retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels, five_s_taxonomy, supply_chain_recommendations)
+    last_plan = ""
+
+    for step in range(max_steps):
+        prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role, evidence=evidence)
+        plan_completion = client.chat.completions.create(
+            model="mistralai/mistral-7b-instruct",
+            temperature=temperature,
+            seed=seed,
+            messages=[
+                {"role": "system", "content": "You are a digital manufacturing systems expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        llm_resp = plan_completion.choices[0].message.content or ""
+        last_plan = llm_resp
+
+        sc_match = re.search(
+            r"\[Supply Chain Configuration & Action Plan\](.*?)(?=\[Improvement Opportunities & Risks\]|\[Digital/AI Next Steps\]|\[Expected 5S Maturity\]|\Z)",
+            llm_resp, re.DOTALL
+        )
+        core_plan = sc_match.group(1).strip() if sc_match else llm_resp
+        gaps = find_5s_gaps(core_plan, five_s_levels)
+        if not gaps:
+            break
+        evidence += "\n\nCRITIC FINDINGS TO ADDRESS NEXT PASS:\n- " + "\n- ".join(gaps)
+
+    return last_plan
+
+# ---------------------- UI ----------------------
+
+# --- Step 1: Define Objective, Industry, and Role ---
+st.header("1. Define Your Manufacturing Objective")
+objective = st.text_input(
+    "Describe your main goal (e.g., launch new product, adopt new technology, expand facility):",
+    value=st.session_state.get("objective", "Automate assembly of micro-machine cells."),
+    key="objective"
+)
+industry = st.selectbox(
+    "Select your industry:",
+    ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"],
+    index=st.session_state.get("industry_idx", 0),
+    key="industry"
+)
+st.session_state["industry_idx"] = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"].index(industry)
+
+role_options = ["Design Engineer", "Process Engineer", "Manufacturing Engineer", "Safety Supervisor","Sustainability Manager", "Supply Chain Analyst", "Manager/Decision Maker", "Other"]
+role_selected = st.selectbox("Select your role:", role_options, index=st.session_state.get("role_idx", 2), key="user_role")
+if role_selected == "Other":
+    custom_role = st.text_input("Please specify your role:", value=st.session_state.get("custom_role", ""), key="custom_role")
+    final_role = custom_role if custom_role else "Other"
+    st.session_state["custom_role"] = custom_role
+else:
+    final_role = role_selected
+st.session_state["role_idx"] = role_options.index(role_selected)
+
+# --- Step 2: Select Manufacturing System Type ---
+st.header("2. Select Manufacturing System Type")
+system_types = ["Product Transfer", "Technology Transfer", "Facility Design"]
+system_type = st.radio("Choose a system type:", system_types, key="system_type")
+st.markdown(f"**Selected system type:** {system_type}")
+
+# --- Step 3: Select LCE Stage Activities ---
+st.header("3. Select Relevant LCE Stages/Actions")
+lce_global_keys = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life"]
+if "lce_global_checked" not in st.session_state:
+    st.session_state["lce_global_checked"] = [False] * len(lce_global_keys)
+
+lce_actions = lce_actions_taxonomy[system_type]
+selected_stages = []
+for i, action in enumerate(lce_actions):
+    action_key = action.split(":")[0].strip()
+    idx = lce_global_keys.index(action_key)
+    checked = st.checkbox(action, value=st.session_state["lce_global_checked"][idx], key=f"lce_global_{i}")
+    st.session_state["lce_global_checked"][idx] = checked
+    if checked:
+        selected_stages.append(action)
+st.session_state["selected_stages"] = selected_stages
+
+# --- Step 4: 5S Maturity Assessment ---
+st.header("4. Assess 5S Maturity (Single Option for Each S)")
+five_s_levels = {}
+cols = st.columns(5)
+for i, dim in enumerate(five_s_taxonomy):
+    with cols[i]:
+        st.subheader(dim)
+        options = []
+        for idx, lvl in enumerate(five_s_taxonomy[dim]):
+            options.append(f"Level {idx}: {lvl['desc']}")
+        level = st.radio(f"Select the most accurate description for {dim}:", options, index=0, key=f"{dim}_radio")
+        level_idx = options.index(level)
+        five_s_levels[dim] = level_idx
+        st.markdown(f"**Level assigned:** {level_idx}")
+        st.markdown(f"_{five_s_taxonomy[dim][level_idx]['desc']}_")
+        techs = five_s_taxonomy[dim][level_idx].get('tech', [])
+        if techs:
+            st.markdown("**Technologies & Tools:**")
+            for t in techs:
+                st.write(f"- {t}")
+st.session_state["five_s_levels"] = five_s_levels
+
+# --- Styles ---
 st.markdown("""
     <style>
     div.stButton > button:first-child {
@@ -446,45 +511,49 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-
-#  --- Step 5 & 6: LLM Supply Chain Action Plan and Other Advice ---
+# --- Agent-backed Plan Generation (replaces single-shot call) ---
 if st.button("Generate Plan and Recommendations"):
-    # 1. Get the PLAN from LLM
-    prompt = build_llm_prompt(system_type, industry, selected_stages, five_s_levels, objective, final_role)
-    with st.spinner("Consulting LLM for plan and recommendations..."):
-        temp = 0.2
-        seed = 42
-        plan_completion = client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct",
-            temperature = temp,
-            seed = seed,
-            messages=[
-                {"role": "system", "content": "You are a digital manufacturing systems expert."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        llm_response = plan_completion.choices[0].message.content
-
-        # Parse the response by section
-        sc_match = re.search(r"\[Supply Chain Configuration & Action Plan\](.*?)(?=\[Improvement Opportunities & Risks\]|\[Digital/AI Next Steps\]|$)", llm_response, re.DOTALL)
-        imp_match = re.search(r"\[Improvement Opportunities & Risks\](.*?)(?=\[Digital/AI Next Steps\]|\Z)", llm_response, re.DOTALL)
-        ai_match = re.search(r"\[Digital/AI Next Steps\](.*)", llm_response, re.DOTALL)
-
-        st.session_state["llm_response"] = llm_response
-        st.session_state["supply_chain_section"] = sc_match.group(1).strip() if sc_match else ""
-
-        plan_text = st.session_state.get("supply_chain_section", "")
-        context_block = build_context_block(
-            objective=objective,
+    with st.spinner("Consulting the Agent for plan and recommendations..."):
+        llm_response = agent_generate_plan(
             system_type=system_type,
             industry=industry,
-            five_s_levels=five_s_levels,
             selected_stages=selected_stages,
-            plan_text=plan_text
+            five_s_levels=five_s_levels,
+            objective=objective,
+            final_role=final_role,
+            max_steps=3, temperature=0.2, seed=42
         )
-        st.session_state["improvement_section"] = imp_match.group(1).strip() if imp_match else ""
-        st.session_state["ai_section"] = ai_match.group(1).strip() if ai_match else ""
+        st.session_state["llm_response"] = llm_response
 
+        # Extract sections
+        sc_match = re.search(r"\[Supply Chain Configuration & Action Plan\](.*?)(?=\[Improvement Opportunities & Risks\]|\[Digital/AI Next Steps\]|\[Expected 5S Maturity\]|\Z)", llm_response, re.DOTALL)
+        imp_match = re.search(r"\[Improvement Opportunities & Risks\](.*?)(?=\[Digital/AI Next Steps\]|\[Expected 5S Maturity\]|\Z)", llm_response, re.DOTALL)
+        ai_match = re.search(r"\[Digital/AI Next Steps\](.*?)(?=\[Expected 5S Maturity\]|\Z)", llm_response, re.DOTALL)
+
+        sc_text = sc_match.group(1).strip() if sc_match else ""
+        imp_text = imp_match.group(1).strip() if imp_match else ""
+        ai_text = ai_match.group(1).strip() if ai_match else ""
+
+        # Optional schema validation
+        if PYDANTIC_AVAILABLE:
+            class PlanSections(BaseModel):
+                supply_chain: str = ""
+                improvements: str = ""
+                ai_next_steps: str = ""
+            try:
+                plan_sections = PlanSections(supply_chain=sc_text, improvements=imp_text, ai_next_steps=ai_text)
+            except ValidationError as e:
+                st.warning(f"Plan had schema issues: {e}")
+                plan_sections = PlanSections()
+            st.session_state["supply_chain_section"] = plan_sections.supply_chain
+            st.session_state["improvement_section"]  = plan_sections.improvements
+            st.session_state["ai_section"]           = plan_sections.ai_next_steps
+        else:
+            st.session_state["supply_chain_section"] = sc_text
+            st.session_state["improvement_section"]  = imp_text
+            st.session_state["ai_section"]           = ai_text
+
+        # Expected 5S
         exp5s_match = re.search(r"\[Expected 5S Maturity\](.*)", llm_response, re.DOTALL)
         if exp5s_match:
             exp5s_str = exp5s_match.group(1)
@@ -497,36 +566,42 @@ if st.button("Generate Plan and Recommendations"):
         else:
             st.session_state["expected_5s"] = five_s_levels.copy()
 
-    # 2. Get the STAGE VIEWS from LLM (JSON, with full context)
-    stage_views_prompt = build_stage_views_prompt_json(context_block, selected_stages)
-    with st.spinner("Consulting LLM for stage views..."):
-        temp = 0.2
-        seed = 42
-        stage_views_completion = client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct",
-            temperature = temp,
-            seed = seed,
-            messages=[
-                {"role": "system", "content": "You are a digital manufacturing systems expert."},
-                {"role": "user", "content": stage_views_prompt}
-            ]
+        # Build context for stage views
+        plan_text = st.session_state.get("supply_chain_section", "")
+        context_block = build_context_block(
+            objective=objective,
+            system_type=system_type,
+            industry=industry,
+            five_s_levels=five_s_levels,
+            selected_stages=selected_stages,
+            plan_text=plan_text
         )
-        views_response = stage_views_completion.choices[0].message.content
 
-    # Parse JSON first
-    try:
-        stage_views = parse_stage_views_json(views_response, selected_stages)
-    except Exception:
-        stage_views = {}
+        # Stage views JSON call
+        stage_views_prompt = build_stage_views_prompt_json(context_block, selected_stages)
+        with st.spinner("Consulting LLM for stage views..."):
+            stage_views_completion = client.chat.completions.create(
+                model="mistralai/mistral-7b-instruct",
+                temperature=0.2,
+                seed=42,
+                messages=[
+                    {"role": "system", "content": "You are a digital manufacturing systems expert."},
+                    {"role": "user", "content": stage_views_prompt}
+                ]
+            )
+            views_response = stage_views_completion.choices[0].message.content
 
-    # Fallback: extract from the plan text if JSON was empty
-    if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
-        stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
+        try:
+            stage_views = parse_stage_views_json(views_response, selected_stages)
+        except Exception:
+            stage_views = {}
 
-    st.session_state["stage_views"] = stage_views
+        if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
+            stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
 
+        st.session_state["stage_views"] = stage_views
 
-# Always show Step 5 if plan/results exist in session_state
+# --- Display Sections (if present) ---
 if "supply_chain_section" in st.session_state:
     st.header("5. Supply Chain Configuration & Action Plan")
     st.markdown(f"**System Type:** {system_type}")
@@ -536,11 +611,8 @@ if "supply_chain_section" in st.session_state:
 
     st.markdown("**Selected LCE Stage:**")
     if displayed_stages:
-        # Top-level list
         st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
-
         for action in displayed_stages:
-            # Safe split
             if ":" in action:
                 stage, desc = action.split(":", 1)
             else:
@@ -549,13 +621,7 @@ if "supply_chain_section" in st.session_state:
             desc = desc.strip()
             views = stage_views.get(stage_key, {})
 
-            # 1) Stage line in one bullet
-            st.markdown(
-                f"<li><b>Stage -> {stage_key}</b>: {desc if desc else ''}",
-                unsafe_allow_html=True
-            )
-
-            # 2) Inner list with grouped engineering sections
+            st.markdown(f"<li><b>Stage -> {stage_key}</b>: {desc if desc else ''}", unsafe_allow_html=True)
             st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
 
             groups = [
@@ -569,46 +635,29 @@ if "supply_chain_section" in st.session_state:
             ]
 
             for heading, items in groups:
-                # Collect non-empty items for this heading
                 present = []
                 for label, key in items:
                     value = views.get(key, "")
                     value = value.strip() if isinstance(value, str) else ""
                     if value:
                         present.append((label, value))
-
-                # Only show the heading if it has at least one item
                 if present:
-                    # Heading bullet (“o …” style via text label)
-                    st.markdown(
-                        f"<li><b>{heading}</b>",
-                        unsafe_allow_html=True
-                    )
-                    # Items under the heading (Function/Organization/…)
+                    st.markdown(f"<li><b>{heading}</b>", unsafe_allow_html=True)
                     st.markdown("<ul style='margin-top:0; margin-bottom:0;'>", unsafe_allow_html=True)
                     for label, value in present:
-                        # “ …” style via nested bullet
-                        st.markdown(
-                            f"<li><i>{label}:</i> {value}</li>",
-                            unsafe_allow_html=True
-                        )
+                        st.markdown(f"<li><i>{label}:</i> {value}</li>", unsafe_allow_html=True)
                     st.markdown("</ul></li>", unsafe_allow_html=True)
 
-            # Close inner list and the Stage bullet
             st.markdown("</ul></li>", unsafe_allow_html=True)
-
-        # Close top-level list
         st.markdown("</ul>", unsafe_allow_html=True)
     else:
         st.info("No LCE stage activities selected.")
-
-    # Keep session_state consistent
     st.session_state["selected_stages"] = displayed_stages
 
     st.markdown("**Supply Chain Strategy:**")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
 
-# --- Step 6 if previous responses exist in session_state
+    # Step 6 summaries
     st.header("6. LLM Advisor: Improvement Opportunities & Digital Next Steps")
     st.subheader("Supply Chain Configuration & Action Plan")
     st.info(st.session_state.get("supply_chain_section", "No tailored supply chain plan was generated."))
@@ -617,8 +666,7 @@ if "supply_chain_section" in st.session_state:
     st.subheader("Digital/AI Next Steps")
     st.info(st.session_state.get("ai_section", "No digital/AI next steps provided."))
 
-
-# 5S Radar Charts Block (always shown, after Digital/AI Next Steps)
+# --- 5S Radar Charts ---
 st.header("Current 5S Profile")
 radar_df = pd.DataFrame({
     "Dimension": list(five_s_taxonomy.keys()),
@@ -627,7 +675,6 @@ radar_df = pd.DataFrame({
 radar_fig = px.line_polar(radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
 st.plotly_chart(radar_fig, use_container_width=True, key="current_5s_profile")
 
-# Expected 5S Radar (AFTER PLAN GENERATED)
 if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five_s_levels:
     st.header("Expected 5S Profile After Improvements")
     expected_radar_df = pd.DataFrame({
@@ -637,16 +684,12 @@ if "expected_5s" in st.session_state and st.session_state["expected_5s"] != five
     expected_radar_fig = px.line_polar(expected_radar_df, r='Level', theta='Dimension', line_close=True, range_r=[0, 4])
     st.plotly_chart(expected_radar_fig, use_container_width=True, key="expected_5s_profile")
 
-
-
-# --- Step 7: Ask the Project LLM Assistant ---
+# --- Step 7: Project Chat Assistant ---
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
 st.header("7. Ask the Project LLM Assistant")
-st.markdown("""
-Type your questions about this manufacturing system scenario, supply chain, or digital strategy.
-""")
+st.markdown("Type your questions about this manufacturing system scenario, supply chain, or digital strategy.")
 user_question = st.text_input("Ask the LLM Assistant (project-specific questions only):", key="user_project_chat")
 
 if st.button("Send Question"):
@@ -663,15 +706,9 @@ Recent LLM Digital/AI Next Steps: {st.session_state.get('ai_section','')}
     system_prompt = (
         "You are a digital manufacturing systems advisor. "
         "Only answer questions related to this specific project scenario. "
-        "If the question is unrelated (e.g., about general knowledge, or non-manufacturing topics), "
-        "politely remind the user that this assistant only answers manufacturing system and supply chain questions related to their current project. "
-        "If the user insists on unrelated topics, just reply: "
-        "'This system is only for manufacturing system and supply chain project advice.'"
+        "If the question is unrelated, politely remind the user this assistant only answers manufacturing system and supply chain questions for their current project."
     )
-    chat_msgs = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": context_block}
-    ]
+    chat_msgs = [{"role": "system", "content": system_prompt}, {"role": "user", "content": context_block}]
     for entry in st.session_state["chat_history"]:
         chat_msgs.append(entry)
     chat_msgs.append({"role": "user", "content": user_question})
@@ -694,12 +731,11 @@ if st.session_state["chat_history"]:
         elif entry["role"] == "assistant":
             st.markdown(f"**Assistant:** {entry['content']}")
 
+# --- PDF export ---
 def to_latin1(text):
-    """Convert string to latin1, replacing non-latin1 chars with closest ASCII or ?"""
     if not isinstance(text, str):
         text = str(text)
     return text.encode('latin-1', 'replace').decode('latin-1')
-
 
 def generate_pdf_report():
     pdf = FPDF()
@@ -707,7 +743,7 @@ def generate_pdf_report():
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, to_latin1("LCE + 5S Manufacturing Decision Support Report"), ln=True, align="C")
     pdf.set_font("Arial", size=11)
-    pdf.cell(200, 10, to_latin1("Developed by Dr. Juana Isabel Méndez and Dr. Arturo Molina"), ln=True, align="C")
+    pdf.cell(200, 8, to_latin1("Developed by Dr. Juana Isabel Méndez and Dr. Arturo Molina"), ln=True, align="C")
     pdf.cell(200, 8, to_latin1("Date: " + datetime.now().strftime("%Y-%m-%d")), ln=True, align="C")
     pdf.ln(8)
     pdf.set_font("Arial", "B", size=12)
@@ -718,31 +754,26 @@ def generate_pdf_report():
     pdf.cell(0, 8, to_latin1(f"Role: {st.session_state.get('custom_role', st.session_state.get('user_role', ''))}"), ln=True)
     pdf.cell(0, 8, to_latin1(f"System Type: {st.session_state.get('system_type', '')}"), ln=True)
     pdf.multi_cell(0, 8, to_latin1(f"LCE Stages: {', '.join(st.session_state.get('selected_stages', [])) or 'None'}"))
-    five_s_levels = st.session_state.get("five_s_levels", {})
-    pdf.multi_cell(0, 8, to_latin1(f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_levels.items()])}"))
+    five_s_lvls = st.session_state.get("five_s_levels", {})
+    pdf.multi_cell(0, 8, to_latin1(f"5S Maturity Levels: {', '.join([f'{dim}: {lvl}' for dim, lvl in five_s_lvls.items()])}"))
 
-
-    # --- Current 5S Radar Chart (NO image in PDF on Streamlit Cloud) ---
-    if five_s_levels:
+    if five_s_lvls:
         pdf.cell(0, 10, "Current 5S Profile: (see radar chart in the web app)", ln=True)
         pdf.ln(10)
 
-    # --- Expected 5S Radar Chart (NO image in PDF on Streamlit Cloud) ---
     expected_5s = st.session_state.get("expected_5s", {})
-    if expected_5s and expected_5s != five_s_levels:
+    if expected_5s and expected_5s != five_s_lvls:
         pdf.cell(0, 10, "Expected 5S After Improvement: (see radar chart in the web app)", ln=True)
         pdf.ln(10)
 
-    # --- LLM Results ---
     pdf.ln(6)
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, "LLM Results", ln=True)
     pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 8, f"Supply Chain Plan:\n{st.session_state.get('supply_chain_section', '')}\n")
-    pdf.multi_cell(0, 8, f"Improvement Opportunities & Risks:\n{st.session_state.get('improvement_section', '')}\n")
-    pdf.multi_cell(0, 8, f"Digital/AI Next Steps:\n{st.session_state.get('ai_section', '')}\n")
+    pdf.multi_cell(0, 8, to_latin1(f"Supply Chain Plan:\n{st.session_state.get('supply_chain_section', '')}\n"))
+    pdf.multi_cell(0, 8, to_latin1(f"Improvement Opportunities & Risks:\n{st.session_state.get('improvement_section', '')}\n"))
+    pdf.multi_cell(0, 8, to_latin1(f"Digital/AI Next Steps:\n{st.session_state.get('ai_section', '')}\n"))
 
-    # --- Conversation History ---
     pdf.ln(6)
     pdf.set_font("Arial", "B", size=12)
     pdf.cell(0, 10, "Conversation History", ln=True)
@@ -750,24 +781,20 @@ def generate_pdf_report():
     for entry in st.session_state.get("chat_history", []):
         if entry["role"] == "user":
             pdf.set_font("Arial", "B", size=12)
-            pdf.multi_cell(0, 8, f"You: {entry['content']}")
+            pdf.multi_cell(0, 8, to_latin1(f"You: {entry['content']}"))
             pdf.set_font("Arial", size=12)
         elif entry["role"] == "assistant":
-            pdf.multi_cell(0, 8, f"Assistant: {entry['content']}")
+            pdf.multi_cell(0, 8, to_latin1(f"Assistant: {entry['content']}"))
 
-    # --- Save PDF to buffer ---
     buf = BytesIO()
-    pdf.output(buf, 'S').encode('latin1')
-    buf.write(pdf.output(dest='S').encode('latin1'))
+    pdf_bytes = pdf.output(dest='S').encode('latin1')
+    buf.write(pdf_bytes)
     buf.seek(0)
     return buf
 
-
 pdf_buf = generate_pdf_report()
-# Generate filename with timestamp
 timestamp = datetime.now().strftime("%m-%d-%y_%H%M")
 filename = f"{timestamp}-Report.pdf"
-# --- Download Button ---
 st.download_button(
     label="Download Full Report (PDF)",
     data=pdf_buf,
