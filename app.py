@@ -884,13 +884,19 @@ if res:
 
     # 8) 5S Profiles
     st.header("5S Profiles")
-    curr_df = pd.DataFrame({"Dimension": list(five_s_levels.keys()), "Level":[five_s_levels[k] for k in five_s_levels]})
-    fig_curr = px.line_polar(curr_df, r="Level", theta="Dimension", line_close=True, range_r=[0,4])
-    st.plotly_chart(fig_curr, use_container_width=True)
+    profiles_box = st.container()
+    
+    curr_df = pd.DataFrame({"Dimension": list(five_s_levels.keys()),
+                            "Level": [five_s_levels[k] for k in five_s_levels]})
+    fig_curr = px.line_polar(curr_df, r="Level", theta="Dimension", line_close=True, range_r=[0, 4])
+    profiles_box.plotly_chart(fig_curr, use_container_width=True, key="five_s_current")
+    
     if expected_5s:
-        exp_df = pd.DataFrame({"Dimension": list(expected_5s.keys()), "Level": [expected_5s[k] for k in expected_5s]})
+        exp_df = pd.DataFrame({"Dimension": list(expected_5s.keys()),
+                               "Level": [expected_5s[k] for k in expected_5s]})
         fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension", line_close=True, range_r=[0, 4])
-        st.plotly_chart(fig_exp, use_container_width=True)
+        profiles_box.plotly_chart(fig_exp, use_container_width=True, key="five_s_expected")
+
 
     # 9) Capacity (hide unless ops are enabled)
     cap = res.get("capacity", {})
