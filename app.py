@@ -17,7 +17,7 @@ import json, re, math
 
 # ------------------------ App + API setup ------------------------
 st.set_page_config(page_title="LCE + 5S Manufacturing Decision Support (AI Agent)", layout="wide")
-st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent")
+st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
 st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
@@ -657,7 +657,7 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
 # ------------------------ UI ------------------------
 
 # 1) Objective / Industry / Role
-st.header("1) Define Scenario")
+st.header("Define Scenario")
 objective = st.text_input("Objective (e.g., launch new product, adopt a new process, expand a facility):",
                           value=st.session_state.get("objective","Design and ramp a flexible small manufacturing cell."),
                           key="objective")
@@ -673,12 +673,12 @@ if role_selected == "Other":
 st.session_state["role_idx"] = role_options.index("Other") if role_selected=="Other" else role_options.index(role_selected)
 
 # 2) Manufacturing System Type
-st.header("2) Select Manufacturing System Type")
+st.header("Select Manufacturing System Type")
 system_types = ["Product Transfer","Technology Transfer","Facility Design"]
 system_type = st.radio("Manufacturing system type:", system_types, key="system_type")
 
 # 3) Select LCE Stages/Actions
-st.header("3) Select Relevant LCE Stages/Actions")
+st.header("Select Relevant LCE Stages/Actions")
 lce_global_keys = ["Ideation","Basic Development","Advanced Development","Launching","End-of-Life"]
 if "lce_global_checked" not in st.session_state:
     st.session_state["lce_global_checked"] = [False]*len(lce_global_keys)
@@ -694,7 +694,7 @@ for i, action in enumerate(lce_actions):
 st.session_state["selected_stages"] = selected_stages
 
 # 4) 5S Maturity
-st.header("4) Current 5S Maturity (one per S)")
+st.header("Current 5S Maturity (one per S)")
 five_s_levels={}
 cols = st.columns(5)
 for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
@@ -706,7 +706,7 @@ for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
         if techs: st.caption("Tech hints: " + "; ".join(techs))
 
 # 5) Demand & KPI Inputs (Option B toggle)
-st.header("5) Demand / Capacity Inputs (optional but recommended)")
+st.header("Demand / Capacity Inputs (optional but recommended)")
 c1,c2,c3,c4,c5 = st.columns(5)
 with c1: weekly_output = st.number_input("Target weekly output (units)", min_value=0, value=0)
 with c2: cycle_time_sec = st.number_input("Cycle time per unit (sec)", min_value=0.0, value=0.0, step=1.0)
@@ -717,39 +717,64 @@ oee_assumed = st.slider("Assumed OEE for capacity calc (if unknown)", min_value=
 demand_info = {"weekly_output": weekly_output,"cycle_time_sec": cycle_time_sec,"shifts_per_day": shifts_per_day,
                "hours_per_shift": hours_per_shift,"days_per_week": days_per_week,"oee": oee_assumed}
 
-st.subheader("5b) Optional KPI Inputs (for OEE/FPY/ESG)")
-with st.expander("Enter KPI inputs if available"):
-    use_kpi_inputs = st.checkbox("Use KPI inputs", value=False)
-    e1, e2, e3 = st.columns(3)
-    with e1:
-        scheduled_time_h   = st.number_input("Scheduled Time (h/week)", 0.0, 200.0, 40.0, 0.5)
-        runtime_h          = st.number_input("Runtime (h/week)",        0.0, 200.0, 36.0, 0.5)
-        ideal_cycle_time_s = st.number_input("Ideal Cycle Time (s/unit)", 0.0, 3600.0, 60.0, 1.0)
-    with e2:
-        total_count   = st.number_input("Units Produced (total)", 0, 1_000_000, 0, 1)
-        good_count    = st.number_input("Good Units",             0, 1_000_000, 0, 1)
-        changeover_min= st.number_input("Avg Changeover (min)",   0.0, 600.0, 0.0, 1.0)
-    with e3:
-        energy_kwh_week = st.number_input("Energy (kWh/week)", 0.0, 1e9, 0.0, 1.0)
-        co2e_kg_week    = st.number_input("CO₂e (kg/week)",    0.0, 1e9, 0.0, 1.0)
-        water_l_week    = st.number_input("Water (L/week)",    0.0, 1e12, 0.0, 1.0)
-kpi_inputs = dict(scheduled_time_h=scheduled_time_h, runtime_h=runtime_h, ideal_cycle_time_s=ideal_cycle_time_s,
-                  total_count=total_count, good_count=good_count, changeover_min=changeover_min,
-                  energy_kwh_week=energy_kwh_week, co2e_kg_week=co2e_kg_week, water_l_week=water_l_week)
+# ---------------- Toggle to show/hide the KPI module ----------------
+show_kpi = st.toggle(
+    "Enable KPI module (OEE/FPY/ESG inputs + KPI Gate targets)",
+    value=False,
+    help="Turn on to enter KPI inputs and/or targets. When OFF, sections 5b and 5c are hidden."
+)
 
-st.subheader("5c) Optional KPI Targets (used by KPI Gate)")
-with st.expander("Set targets to enable pass/fail checks"):
-    t1, t2, t3 = st.columns(3)
-    with t1:
-        tgt_oee = st.number_input("Target OEE (%)", 0.0, 100.0, 0.0, 0.5)
-        tgt_fpy = st.number_input("Target FPY (%)", 0.0, 100.0, 0.0, 0.5)
-        tgt_service = st.number_input("Target Service Level / Fill Rate (%)", 0.0, 100.0, 0.0, 0.5)
-    with t2:
-        tgt_lead_time = st.number_input("Target Lead Time (days) — lower is better", 0.0, 365.0, 0.0, 0.5)
-        tgt_energy = st.number_input("Target Energy (kWh/unit) — lower is better", 0.0, 1e6, 0.0, 0.01)
-        tgt_co2e = st.number_input("Target CO₂e (kg/unit) — lower is better", 0.0, 1e6, 0.0, 0.01)
-    with t3:
-        pass
+# Safe defaults (so later code never crashes if KPI module is OFF)
+use_kpi_inputs = False
+scheduled_time_h = runtime_h = ideal_cycle_time_s = 0.0
+total_count = good_count = 0
+changeover_min = 0.0
+energy_kwh_week = co2e_kg_week = water_l_week = 0.0
+
+tgt_oee = tgt_fpy = tgt_service = 0.0
+tgt_lead_time = tgt_energy = tgt_co2e = 0.0
+
+# ----------- 5b) Optional KPI Inputs (only if toggle is ON) ----------
+if show_kpi:
+    st.subheader("Optional KPI Inputs (for OEE/FPY/ESG)")
+    with st.expander("Enter KPI inputs if available", expanded=False):
+        use_kpi_inputs = st.checkbox("Use KPI inputs", value=False, key="use_kpi_inputs")
+        e1, e2, e3 = st.columns(3)
+        with e1:
+            scheduled_time_h   = st.number_input("Scheduled Time (h/week)", 0.0, 200.0, 40.0, 0.5)
+            runtime_h          = st.number_input("Runtime (h/week)",        0.0, 200.0, 36.0, 0.5)
+            ideal_cycle_time_s = st.number_input("Ideal Cycle Time (s/unit)", 0.0, 3600.0, 60.0, 1.0)
+        with e2:
+            total_count    = st.number_input("Units Produced (total)", 0, 1_000_000, 0, 1)
+            good_count     = st.number_input("Good Units",             0, 1_000_000, 0, 1)
+            changeover_min = st.number_input("Avg Changeover (min)",   0.0, 600.0, 0.0, 1.0)
+        with e3:
+            energy_kwh_week = st.number_input("Energy (kWh/week)", 0.0, 1e9, 0.0, 1.0)
+            co2e_kg_week    = st.number_input("CO₂e (kg/week)",    0.0, 1e9, 0.0, 1.0)
+            water_l_week    = st.number_input("Water (L/week)",    0.0, 1e12, 0.0, 1.0)
+
+kpi_inputs = dict(
+    scheduled_time_h=scheduled_time_h, runtime_h=runtime_h, ideal_cycle_time_s=ideal_cycle_time_s,
+    total_count=total_count, good_count=good_count, changeover_min=changeover_min,
+    energy_kwh_week=energy_kwh_week, co2e_kg_week=co2e_kg_week, water_l_week=water_l_week,
+)
+
+# ----------- 5c) Optional KPI Targets (only if toggle is ON) ----------
+if show_kpi:
+    st.subheader("Optional KPI Targets (used by KPI Gate)")
+    with st.expander("Set targets to enable pass/fail checks", expanded=False):
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            tgt_oee     = st.number_input("Target OEE (%)", 0.0, 100.0, 0.0, 0.5)
+            tgt_fpy     = st.number_input("Target FPY (%)", 0.0, 100.0, 0.0, 0.5)
+            tgt_service = st.number_input("Target Service Level / Fill Rate (%)", 0.0, 100.0, 0.0, 0.5)
+        with t2:
+            tgt_lead_time = st.number_input("Target Lead Time (days) — lower is better", 0.0, 365.0, 0.0, 0.5)
+            tgt_energy    = st.number_input("Target Energy (kWh/unit) — lower is better", 0.0, 1e6, 0.0, 0.01)
+            tgt_co2e      = st.number_input("Target CO₂e (kg/unit) — lower is better", 0.0, 1e6, 0.0, 0.01)
+        with t3:
+            pass  # reserved
+
 kpi_targets = {
     "OEE_pct": tgt_oee if tgt_oee > 0 else None,
     "FPY_pct": tgt_fpy if tgt_fpy > 0 else None,
@@ -759,7 +784,7 @@ kpi_targets = {
     "co2e_kg_per_unit": tgt_co2e if tgt_co2e > 0 else None,
 }
 
-st.header("6) (Optional) Upload relevant docs (manuals/specs/SOPs)")
+st.header("Optional Upload relevant docs (manuals/specs/SOPs)")
 uploads = st.file_uploader("Upload .txt/.md/.csv/.log/.docx/.pdf (max a few MB). Multiple allowed.",
                            type=["txt","md","csv","log","docx","pdf"], accept_multiple_files=True)
 docs_text = ""
@@ -771,7 +796,7 @@ if uploads:
     docs_text = "\n\n".join(pieces)
 
 # --------------- Run agent ---------------
-st.header("4) Agent Controls")
+st.header("Agent Controls")
 enable_agent = st.toggle("Enable Agent Mode (plan → tools → reflect)", value=True)
 auto_iterate = st.toggle("Auto-iterate until pass (standards + 5S coverage)", value=True)
 
@@ -798,7 +823,7 @@ if st.button("Generate Plan & Recommendations"):
 # ------------------------ Results ------------------------
 res = st.session_state.get("agent_result")
 if res:
-    st.header("7) Results")
+    st.header("Results")
     plan_text = res["plan_text"]
 
     # 7a) Stage Views — System Type + Selected LCE Stages rendered
@@ -849,7 +874,7 @@ if res:
     st.info(exp_lines)
 
     # 8) 5S Profiles
-    st.header("8) 5S Profiles")
+    st.header("5S Profiles")
     curr_df = pd.DataFrame({"Dimension": list(five_s_levels.keys()), "Level":[five_s_levels[k] for k in five_s_levels]})
     fig_curr = px.line_polar(curr_df, r="Level", theta="Dimension", line_close=True, range_r=[0,4])
     st.plotly_chart(fig_curr, use_container_width=True)
@@ -861,7 +886,7 @@ if res:
     # 9) Capacity (only if computed)
     cap = res.get("capacity", {})
     if cap and cap.get("takt_sec") is not None:
-        st.header("9) Capacity Sizing (from demand inputs)")
+        st.header("Capacity Sizing (from demand inputs)")
         st.success(f"Computed takt ≈ {cap.get('takt_sec',0):.1f} s | Required parallel stations: {cap.get('stations','?')}")
         st.caption("The agent feeds these into the planner; the plan should echo them in layout/staffing.")
 
@@ -875,7 +900,7 @@ if res:
     any_kpi_target = any(v for v in (targets or {}).values())
     computed_has_kpis = any(v is not None for v in (kpis or {}).values())
     if any_kpi_input or any_kpi_target or computed_has_kpis:
-        st.header("10) KPI Panel")
+        st.header("KPI Panel")
         def tidy(metric_key, label, unit):
             val = kpis.get(metric_key); tgt = targets.get(metric_key); status = "—"
             if val is None and tgt: status = "no data"
@@ -899,7 +924,7 @@ if res:
         # 11) Standards Gate (only if relevant)
         warns = res.get("standards_warnings", [])
         if warns or any_kpi_input or any_kpi_target:
-            st.header("11) Standards Gate")
+            st.header("Standards Gate")
             if warns:
                 msg = "Standards/compliance warnings:\n- " + "\n- ".join([str(w) for w in warns])
                 st.error(msg)
@@ -909,7 +934,7 @@ if res:
     # 12) Risk Register (only if exists)
     risks = res.get("risk_register",{}).get("risks",[])
     if risks:
-        st.header("12) Risk Register")
+        st.header("Risk Register")
         df = pd.DataFrame(risks)
         st.dataframe(df, use_container_width=True)
         st.download_button("Download Risk Register (CSV)", df.to_csv(index=False).encode("utf-8"),
