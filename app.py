@@ -1,9 +1,9 @@
-# LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent (no‑BOM)
-# Author(s): Dr. J. Isabel Méndez & Dr. Arturo Molina
+# LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent
+# Authors: Dr. J. Isabel Méndez & Dr. Arturo Molina
 # Notes:
-# - This app implements a bounded AI AGENT (planner → tools → reflector) that USES an LLM.
-# - It is NOT "agentic AI" (no autonomous tool selection, no long‑horizon self‑planning/memory).
-# - Adds KPI inputs, KPI computation, and a KPI Gate so plans must reference/meet measurable targets.
+# - Bounded AI AGENT (planner → tools → reflector) that USES an LLM.
+# - Not "agentic AI" (no autonomous long-horizon self-planning/memory).
+# - Option B: KPI inputs are used ONLY if the user ticks "Use KPI inputs".
 
 import streamlit as st
 import pandas as pd
@@ -15,8 +15,8 @@ from datetime import datetime
 import json, re, math
 
 # ------------------------ App + API setup ------------------------
-st.set_page_config(page_title="LCE + 5S Decision Support", layout="wide")
-st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
+st.set_page_config(page_title="LCE + 5S Manufacturing Decision Support (AI Agent)", layout="wide")
+st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent")
 st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
@@ -176,7 +176,7 @@ def extract_expected_levels(text, fallback):
 # ------------------------ Agent state ------------------------
 class AgentState:
     def __init__(self, objective, system_type, industry, five_s_levels, selected_stages,
-                 demand_info, docs_text, kpi_inputs, kpi_targets):
+                 demand_info, docs_text, kpi_inputs, kpi_targets, use_kpi_inputs: bool):
         self.objective = objective
         self.system_type = system_type
         self.industry = industry
@@ -187,6 +187,7 @@ class AgentState:
         self.kpi_inputs = kpi_inputs or {}
         self.kpis = {}
         self.kpi_targets = kpi_targets or {}
+        self.use_kpi_inputs = bool(use_kpi_inputs)
         self.spec_data = {}
         self.observations = []
 
@@ -197,7 +198,7 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
     dem_js = json.dumps(state.demand_info, ensure_ascii=False)
     doc_snip = (state.docs_text or "")[:TXT_LIMIT]
 
-    # Build the prompt using sentinel markers, not triple quotes
+    # Build the prompt with markers (no nested triple quotes)
     prompt = (
         f"You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.\n\n"
         "Context:\n"
@@ -230,7 +231,6 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         temperature=0.2,
         seed=42,
     )
-
 
 # ------------------------ Tools ------------------------
 class Tool:
@@ -288,7 +288,6 @@ class DocIntakeLLM(Tool):
             js = {"constraints":[],"standards":[],"safety":[],"parameters":{}}
         return {"tool": self.name, "summary":"Doc constraints extracted", "data": js}
 
-
 class CapacityCalculator(Tool):
     name = "capacity_calc"
     def run(self, state):
@@ -314,13 +313,29 @@ class KPIEvaluator(Tool):
         d = state.demand_info or {}
         ki = state.kpi_inputs or {}
         out = {}
-        # Throughput (units/h)
+
+        # Throughput (units/h) — only when there is demand
         days = d.get("days_per_week", 5)
         hours = d.get("hours_per_shift", 8.0) * d.get("shifts_per_day", 1)
         weekly_output = d.get("weekly_output", 0)
         denom = (days * hours)
-        out["throughput_units_per_h"] = (weekly_output / denom) if denom > 0 else None
-        # OEE, FPY
+        if weekly_output and weekly_output > 0 and denom > 0:
+            out["throughput_units_per_h"] = weekly_output / denom
+        else:
+            out["throughput_units_per_h"] = None
+
+        # If the user didn't enable KPI inputs, skip OEE/FPY/ESG calculations
+        if not state.use_kpi_inputs:
+            out["OEE_pct"] = None
+            out["FPY_pct"] = None
+            out["energy_kWh_per_unit"] = None
+            out["co2e_kg_per_unit"] = None
+            out["water_L_per_unit"] = None
+            out["changeover_min"] = None
+            state.kpis = out
+            return {"tool": self.name, "summary": "KPI metrics skipped (user did not enable KPI inputs)", "data": out}
+
+        # OEE / FPY (when inputs exist)
         rt = (ki.get("runtime_h") or 0.0) * 3600.0
         stime = (ki.get("scheduled_time_h") or 0.0) * 3600.0
         total = ki.get("total_count") or 0
@@ -337,7 +352,8 @@ class KPIEvaluator(Tool):
         else:
             out["OEE_pct"] = None
             out["FPY_pct"] = None
-        # ESG per unit
+
+        # ESG per unit (when demand exists)
         if weekly_output and weekly_output>0:
             out["energy_kWh_per_unit"] = (ki.get("energy_kwh_week") or 0.0) / weekly_output if ki.get("energy_kwh_week") else None
             out["co2e_kg_per_unit"] = (ki.get("co2e_kg_week") or 0.0) / weekly_output if ki.get("co2e_kg_week") else None
@@ -346,13 +362,13 @@ class KPIEvaluator(Tool):
             out["energy_kWh_per_unit"] = None
             out["co2e_kg_per_unit"] = None
             out["water_L_per_unit"] = None
+
         out["changeover_min"] = ki.get("changeover_min") or None
         state.kpis = out
         return {"tool": self.name, "summary": "KPI metrics computed", "data": out}
 
 class StandardsGate(Tool):
     name = "standards_gate"
-    # Core reference rules, plus a KPI reference rule when KPI data/targets exist
     RULES = [
         ("quality_system", r"ISO\s?9001"),
         ("environment", r"ISO\s?14001|LCA|GaBi|OpenLCA"),
@@ -379,28 +395,19 @@ class StandardsGate(Tool):
     def _parse_kpi_targets(self, text: str, success_metrics:list) -> dict:
         targets = {}
         blob = (text or "") + "\n" + "\n".join(success_metrics or [])
-        # Percent up-goals (>=)
         for m in re.finditer(r"\b(OEE|FPY|service level|fill rate)\b.*?(>=|≥|>|=)\s*([0-9]+(?:\.[0-9]+)?)\s*%?", blob, re.IGNORECASE):
             key = self.KPI_KEY_MAP[m.group(1).lower()]
             val = float(m.group(3))
-            if val <= 1.0:  # treat as fraction
+            if val <= 1.0:
                 val *= 100.0
             targets[key] = (">=", val)
-        # Lead time down-goal (<= days)
         for m in re.finditer(r"\b(lead time)\b.*?(<=|≤|<|=)\s*([0-9]+(?:\.[0-9]+)?)\s*(d|day|days)\b", blob, re.IGNORECASE):
             key = self.KPI_KEY_MAP[m.group(1).lower()]
-            val = float(m.group(3))
-            targets[key] = ("<=", val)
-        # CO2e per unit down-goal (<= kg)
+            targets[key] = ("<=", float(m.group(3)))
         for m in re.finditer(r"\b(CO2e?|carbon)\b.*?(<=|≤|<|=)\s*([0-9]+(?:\.[0-9]+)?)\s*(kg)(?:/unit|\s*per\s*unit)?\b", blob, re.IGNORECASE):
-            key = "co2e_kg_per_unit"
-            val = float(m.group(3))
-            targets[key] = ("<=", val)
-        # Energy per unit down-goal (<= kWh)
+            targets["co2e_kg_per_unit"] = ("<=", float(m.group(3)))
         for m in re.finditer(r"\benergy\b.*?(<=|≤|<|=)\s*([0-9]+(?:\.[0-9]+)?)\s*(kWh)(?:/unit|\s*per\s*unit)?\b", blob, re.IGNORECASE):
-            key = "energy_kWh_per_unit"
-            val = float(m.group(2))
-            targets[key] = ("<=", val)
+            targets["energy_kWh_per_unit"] = ("<=", float(m.group(2)))
         return targets
 
     def _eval_kpi_targets(self, kpis: dict, targets: dict) -> list:
@@ -430,19 +437,17 @@ class StandardsGate(Tool):
 
         has_demand = bool(state.demand_info.get("weekly_output") and state.demand_info.get("cycle_time_sec"))
 
-        # Parse KPI targets from plan + spec success_metrics, then merge with user targets (user overrides)
         parsed_targets = self._parse_kpi_targets(text, (state.spec_data or {}).get("success_metrics", []))
         merged_targets = dict(parsed_targets)
         for k, v in (state.kpi_targets or {}).items():
             if v is None or v == 0:
                 continue
-            # infer direction by metric
             if k in ("OEE_pct", "FPY_pct", "service_level_pct"):
                 merged_targets[k] = (">=", float(v))
             else:
                 merged_targets[k] = ("<=", float(v))
 
-        # Enable rules heuristically based on system type + levels + demand + KPI context
+        has_kpi_values = any(v is not None for v in (state.kpis or {}).values())
         enable = {
             "quality_system": True,
             "environment": state.five_s_levels.get("Sustainable",0) >= 2,
@@ -452,7 +457,7 @@ class StandardsGate(Tool):
             "traceability": state.system_type in ("Product Transfer","Technology Transfer"),
             "interoperability": state.five_s_levels.get("Sensing",0)>=3,
             "capacity_ref": has_demand,
-            "kpi_ref": bool(state.kpis) or bool(merged_targets),
+            "kpi_ref": has_kpi_values or bool(merged_targets),
         }
         for key, regex in self.RULES:
             if enable.get(key):
@@ -460,9 +465,7 @@ class StandardsGate(Tool):
                     label = key.replace("_"," ").title()
                     warnings.append(f"Missing reference: {label} (expected pattern: {regex})")
 
-        # Evaluate KPI targets if any
         warnings += self._eval_kpi_targets(state.kpis or {}, merged_targets)
-        # Persist the merged targets for UI/PDF
         state.kpi_targets = {k: v[1] for k, v in merged_targets.items()}
         return {"tool": self.name, "summary": "Standards Gate: OK" if not warnings else "Standards Gate: WARN", "data": {"warnings": warnings}}
 
@@ -502,17 +505,16 @@ TOOL_REGISTRY = {
 
 # ------------------------ Agent runner ------------------------
 def agent_run(objective, system_type, industry, selected_stages, five_s_levels,
-              demand_info: dict, docs_text: str, kpi_inputs: dict, kpi_targets: dict,
+              demand_info: dict, docs_text: str, kpi_inputs: dict, kpi_targets: dict, use_kpi_inputs: bool,
               enable_agent=True, auto_iterate=True, max_steps=3):
     state = AgentState(objective, system_type, industry, five_s_levels, selected_stages,
-                       demand_info, docs_text, kpi_inputs, kpi_targets)
+                       demand_info, docs_text, kpi_inputs, kpi_targets, use_kpi_inputs)
     evidence = retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels)
     plan_text = ""; standards_warnings = []
 
     steps = 1 if not enable_agent else max_steps
     observations = []
     for step in range(steps):
-        # PLAN
         plan_text = plan_with_llm(state, evidence)
         state._latest_plan_text = plan_text
         state._latest_evidence = evidence
@@ -520,7 +522,6 @@ def agent_run(objective, system_type, industry, selected_stages, five_s_levels,
         sc_text = parse_section(plan_text, "Supply Chain Configuration & Action Plan") or plan_text
         gaps = find_5s_gaps(sc_text, five_s_levels)
 
-        # EXECUTE TOOLS (context-aware)
         run_tools = []
         if step == 0: run_tools.append("spec_extractor")
         if docs_text.strip() and step == 0: run_tools.append("doc_intake")
@@ -536,7 +537,6 @@ def agent_run(objective, system_type, industry, selected_stages, five_s_levels,
             if name == "standards_gate":
                 standards_warnings = out["data"].get("warnings", [])
 
-        # REFLECT
         passed_standards = (len(standards_warnings) == 0)
         passed_5s = (len(gaps) == 0)
         if not enable_agent or not auto_iterate:
@@ -552,14 +552,12 @@ def agent_run(objective, system_type, industry, selected_stages, five_s_levels,
                 critic.append("STANDARDS FINDINGS:\n- " + "\n- ".join(standards_warnings[:10]))
             if not passed_5s:
                 critic.append("5S COVERAGE FINDINGS:\n- " + "\n- ".join(gaps[:10]))
-            # if capacity tool ran, surface its suggestion
             cap = next((o for o in observations if o["tool"] == "capacity_calc"), None)
             if cap and cap.get("data", {}).get("stations"):
                 s = cap["data"]
                 critic.append(f"CAPACITY SUGGESTION:\n- Target stations: {s['stations']} (takt≈{s['takt_sec']:.1f}s). Reflect in layout, staffing, and scheduling.")
             evidence += "\n\n[NEEDS FIX — ADDRESS IN NEXT PASS]\n" + "\n\n".join(critic)
 
-    # collect outputs
     risk = next((o for o in observations if o["tool"] == "risk_register"), {"data": {"risks": []}})
     cap = next((o for o in observations if o["tool"] == "capacity_calc"), {"data": {}})
 
@@ -636,7 +634,6 @@ with c2: cycle_time_sec = st.number_input("Cycle time per unit (sec)", min_value
 with c3: shifts_per_day = st.number_input("Shifts per day", min_value=1, max_value=4, value=1)
 with c4: hours_per_shift = st.number_input("Hours per shift", min_value=1.0, max_value=12.0, value=8.0, step=0.5)
 with c5: days_per_week = st.number_input("Days per week", min_value=1, max_value=7, value=5)
-
 oee_assumed = st.slider("Assumed OEE for capacity calc (if unknown)", min_value=0.3, max_value=0.95, value=0.7, step=0.05)
 demand_info = {
     "weekly_output": weekly_output,
@@ -649,19 +646,21 @@ demand_info = {
 
 st.subheader("5b) Optional KPI Inputs (for OEE/FPY/ESG)")
 with st.expander("Enter KPI inputs if available"):
+    # OPTION B: explicit switch to honor KPI inputs
+    use_kpi_inputs = st.checkbox("Use KPI inputs", value=False)
     e1, e2, e3 = st.columns(3)
     with e1:
-        scheduled_time_h = st.number_input("Scheduled Time (h/week)", 0.0, 200.0, 40.0, 0.5)
-        runtime_h = st.number_input("Runtime (h/week)", 0.0, 200.0, 36.0, 0.5)
+        scheduled_time_h   = st.number_input("Scheduled Time (h/week)", 0.0, 200.0, 40.0, 0.5)
+        runtime_h          = st.number_input("Runtime (h/week)",        0.0, 200.0, 36.0, 0.5)
         ideal_cycle_time_s = st.number_input("Ideal Cycle Time (s/unit)", 0.0, 3600.0, 60.0, 1.0)
     with e2:
-        total_count = st.number_input("Units Produced (total)", 0, 1_000_000, 0, 1)
-        good_count = st.number_input("Good Units", 0, 1_000_000, 0, 1)
-        changeover_min = st.number_input("Avg Changeover (min)", 0.0, 600.0, 0.0, 1.0)
+        total_count   = st.number_input("Units Produced (total)", 0, 1_000_000, 0, 1)
+        good_count    = st.number_input("Good Units",             0, 1_000_000, 0, 1)
+        changeover_min= st.number_input("Avg Changeover (min)",   0.0, 600.0, 0.0, 1.0)
     with e3:
         energy_kwh_week = st.number_input("Energy (kWh/week)", 0.0, 1e9, 0.0, 1.0)
-        co2e_kg_week = st.number_input("CO₂e (kg/week)", 0.0, 1e9, 0.0, 1.0)
-        water_l_week = st.number_input("Water (L/week)", 0.0, 1e12, 0.0, 1.0)
+        co2e_kg_week    = st.number_input("CO₂e (kg/week)",    0.0, 1e9, 0.0, 1.0)
+        water_l_week    = st.number_input("Water (L/week)",    0.0, 1e12, 0.0, 1.0)
 
 kpi_inputs = dict(
     scheduled_time_h=scheduled_time_h, runtime_h=runtime_h, ideal_cycle_time_s=ideal_cycle_time_s,
@@ -717,6 +716,7 @@ if st.button("Generate Plan & Recommendations"):
             docs_text=docs_text,
             kpi_inputs=kpi_inputs,
             kpi_targets=kpi_targets,
+            use_kpi_inputs=use_kpi_inputs,
             enable_agent=enable_agent,
             auto_iterate=auto_iterate,
             max_steps=3,
@@ -752,28 +752,27 @@ if res:
         fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension", line_close=True, range_r=[0, 4])
         st.plotly_chart(fig_exp, use_container_width=True)
 
-    # Capacity
+    # --------- 9) Capacity (only if computed) ----------
     cap = res.get("capacity", {})
-    # Show section only if capacity was actually computed
     if cap and cap.get("takt_sec") is not None:
         st.header("9) Capacity Sizing (from demand inputs)")
         st.success(f"Computed takt ≈ {cap.get('takt_sec',0):.1f} s | Required parallel stations: {cap.get('stations','?')}")
         st.caption("The agent feeds these into the planner; the plan should echo them in layout/staffing.")
 
-    # KPI Panel
+    # --------- 10) KPI Panel (only with meaningful data) ----------
     kpis = res.get("kpis", {})
     targets = res.get("kpi_targets", {})
-    any_kpi_input = any([
+    any_kpi_input = use_kpi_inputs and any([
         scheduled_time_h>0, runtime_h>0, ideal_cycle_time_s>0,
         total_count>0, good_count>0, changeover_min>0,
         energy_kwh_week>0, co2e_kg_week>0, water_l_week>0,
     ])
-    any_kpi_target = any(v for v in targets.values())
-    computed_has_kpis = any(v is not None for v in kpis.values())
+    any_kpi_target = any(v for v in (targets or {}).values())
+    computed_has_kpis = any(v is not None for v in (kpis or {}).values())
 
     if any_kpi_input or any_kpi_target or computed_has_kpis:
         st.header("10) KPI Panel")
-        # Build a tidy KPI table for display
+
         def tidy(metric_key, label, unit):
             val = kpis.get(metric_key)
             tgt = targets.get(metric_key)
@@ -785,9 +784,9 @@ if res:
                     status = "OK" if val >= tgt else "NOT MET"
                 else:
                     status = "OK" if val <= tgt else "NOT MET"
-            return {"Metric": label, "Value": None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}"),
-                    "Target": None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}"),
-                    "Status": status}
+            shown_val = None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}")
+            shown_tgt = None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}")
+            return {"Metric": label, "Value": shown_val, "Target": shown_tgt, "Status": status}
 
         rows = [
             tidy("throughput_units_per_h", "Throughput", "units/h"),
@@ -803,7 +802,7 @@ if res:
         df_kpi = pd.DataFrame(rows)
         st.dataframe(df_kpi, use_container_width=True)
 
-        # Standards Gate (only if KPI context exists or warnings present)
+        # --------- 11) Standards Gate (only if needed) ----------
         warns = res.get("standards_warnings", [])
         if warns or any_kpi_input or any_kpi_target:
             st.header("11) Standards Gate")
@@ -813,7 +812,7 @@ if res:
             else:
                 st.success("Standards Gate: OK")
 
-    # Risk Register (only if risks exist)
+    # --------- 12) Risk Register (only if exists) ----------
     risks = res.get("risk_register",{}).get("risks",[])
     if risks:
         st.header("12) Risk Register")
@@ -823,15 +822,13 @@ if res:
                            "risk_register.csv","text/csv")
 
 # ------------------------ PDF export ------------------------
-
 def to_latin1(text):
     if not isinstance(text,str): text=str(text)
     return text.encode('latin-1','replace').decode('latin-1')
 
-
 def generate_pdf_report(plan_text, five_s_levels, warnings, risks, cap, kpis, targets):
     pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", size=12)
-    pdf.cell(0,10,to_latin1("LCE + 5S Manufacturing Decision Support (AI Agent, no‑BOM)"), ln=True, align="C")
+    pdf.cell(0,10,to_latin1("LCE + 5S Manufacturing Decision Support (AI Agent, no-BOM)"), ln=True, align="C")
     pdf.set_font("Arial", size=11)
     pdf.cell(0,8,to_latin1("Developed by Dr. Juana Isabel Méndez and Dr. Arturo Molina"), ln=True, align="C")
     pdf.cell(0,8,to_latin1("Date: "+datetime.now().strftime("%Y-%m-%d")), ln=True, align="C")
@@ -840,13 +837,11 @@ def generate_pdf_report(plan_text, five_s_levels, warnings, risks, cap, kpis, ta
         pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1(head), ln=True)
         pdf.set_font("Arial", size=11); pdf.multi_cell(0,7,to_latin1(parse_section(plan_text, head) or "—")); pdf.ln(2)
 
-    # Capacity
     if cap and cap.get("takt_sec") is not None:
         pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1("Capacity Sizing"), ln=True)
         pdf.set_font("Arial", size=11)
         pdf.multi_cell(0,7,to_latin1(f"Takt ≈ {cap.get('takt_sec',0):.1f} s; Required stations: {cap.get('stations','?')}"))
 
-    # KPI table
     if kpis:
         pdf.ln(4); pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1("KPI Summary"), ln=True)
         pdf.set_font("Arial", size=11)
@@ -881,6 +876,7 @@ def generate_pdf_report(plan_text, five_s_levels, warnings, risks, cap, kpis, ta
     buf = BytesIO(); pdf_bytes = pdf.output(dest='S').encode('latin1')
     buf.write(pdf_bytes); buf.seek(0); return buf
 
+res = st.session_state.get("agent_result")
 if res:
     pdf_buf = generate_pdf_report(
         res.get("plan_text",""),
