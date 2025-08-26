@@ -958,6 +958,128 @@ if res:
         st.download_button("Download Risk Register (CSV)", df.to_csv(index=False).encode("utf-8"),
                            "risk_register.csv","text/csv")
 
+
+# ================================
+# Results Q&A (chat with the plan)
+# ================================
+def _shorten(txt: str, limit: int = 2000) -> str:
+    if not txt:
+        return ""
+    txt = str(txt).strip()
+    return txt if len(txt) <= limit else (txt[:limit] + " …")
+
+def _build_results_context(res, five_s_levels, selected_stages, objective, system_type, industry, role):
+    plan_text = res.get("plan_text","")
+    sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan")
+    imp = parse_section(plan_text, "Improvement Opportunities & Risks")
+    nxt = parse_section(plan_text, "Digital/AI Next Steps")
+    exp = parse_section(plan_text, "Expected 5S Maturity")
+    stage_views = res.get("stage_views", {}) or {}
+    cap = res.get("capacity", {}) or {}
+    kpis = res.get("kpis", {}) or {}
+    tg  = res.get("kpi_targets", {}) or {}
+    warns = res.get("standards_warnings", []) or []
+    risks = (res.get("risk_register", {}) or {}).get("risks", []) or []
+
+    # compact stage views
+    sv_lines = []
+    for s in [s.split(":")[0].strip() for s in selected_stages]:
+        v = stage_views.get(s, {})
+        if any(v.values()):
+            sv_lines.append(
+                f"- {s}: Fn={v.get('Function','')}; Org={v.get('Organization','')}; "
+                f"Info={v.get('Information','')}; Res={v.get('Resource','')}; Perf={v.get('Performance','')}"
+            )
+
+    ctx = [
+        "PROJECT",
+        f"- Objective: {objective}",
+        f"- System Type: {system_type}",
+        f"- Industry: {industry}",
+        f"- Role: {role}",
+        f"- Selected LCE Stages: {', '.join([s.split(':')[0] for s in selected_stages]) or 'None'}",
+        f"- 5S Levels (current): " + ", ".join([f"{k}={v}" for k,v in five_s_levels.items()]),
+        "",
+        "[Supply Chain Configuration & Action Plan]",
+        _shorten(sc, 2500),
+        "",
+        "[Improvement Opportunities & Risks]",
+        _shorten(imp, 1200),
+        "",
+        "[Digital/AI Next Steps]",
+        _shorten(nxt, 800),
+        "",
+        "[Expected 5S Maturity]",
+        _shorten(exp, 400),
+        "",
+        "[Stage Views]",
+        _shorten("\n".join(sv_lines), 1500),
+        "",
+        "[Capacity]",
+        _shorten(json.dumps(cap, ensure_ascii=False), 400),
+        "",
+        "[KPIs]",
+        _shorten(json.dumps({"values": kpis, "targets": tg}, ensure_ascii=False), 600),
+        "",
+        "[Standards Gate Warnings]",
+        _shorten("\n".join(f"- {w}" for w in warns), 600),
+        "",
+        "[Risk Register]",
+        _shorten("\n".join(f"- {r.get('name','')} | mit: {r.get('mitigation','')} | stage: {r.get('stage','')}" for r in risks[:10]), 1000),
+    ]
+    return "\n".join(ctx)
+
+# Render chat UI only when we have results
+if res:
+    st.header("Ask the Agent about these results")
+
+    # Reset button (unique key to avoid duplicate-id issues)
+    cols_chat = st.columns([1,1,6])
+    with cols_chat[0]:
+        if st.button("Reset chat", key="results_chat_reset"):
+            st.session_state.pop("results_chat_history", None)
+
+    # Show past conversation
+    if "results_chat_history" not in st.session_state:
+        st.session_state["results_chat_history"] = []
+
+    for m in st.session_state["results_chat_history"]:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    user_q = st.chat_input("Ask about capacity, KPIs, stage views, risks, or suggest changes…")
+    if user_q:
+        # Echo user message
+        st.session_state["results_chat_history"].append({"role":"user","content":user_q})
+        with st.chat_message("user"):
+            st.markdown(user_q)
+
+        # Build compact context from current results
+        ctx = _build_results_context(
+            res, five_s_levels, st.session_state.get("selected_stages", []),
+            objective, system_type, industry, role_selected
+        )
+
+        # Keep only the last few turns to bound tokens
+        history = st.session_state["results_chat_history"][-6:]
+
+        # Compose LLM messages
+        msgs = [{"role":"system","content":
+                 "You are a manufacturing systems expert. Answer strictly from the provided CONTEXT. "
+                 "If something isn’t in the context, say so briefly. Be concise and actionable."}]
+        msgs.append({"role":"user","content": f"CONTEXT:\n{ctx}\n\nQUESTION: {user_q}"})
+        # (Optional) include last assistant turns as extra grounding
+        for h in history[:-1]:
+            # merge as ‘assistant said… / user said…’ inside the same context turn to keep control tight
+            msgs.append({"role": "user" if h["role"]=="user" else "assistant", "content": _shorten(h["content"], 1200)})
+
+        # Call your existing LLM wrapper
+        answer = llm(msgs, temperature=0.2, seed=42)
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+        st.session_state["results_chat_history"].append({"role":"assistant","content":answer})
+
+
 # ------------------------ PDF export ------------------------
 def to_latin1(text):
     if not isinstance(text,str): text=str(text)
