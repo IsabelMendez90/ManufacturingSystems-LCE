@@ -20,6 +20,41 @@ st.set_page_config(page_title="LCE + 5S", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
 st.markdown("Developed by: **Dr. J. Isabel Méndez** & **Dr. Arturo Molina**")
 
+st.markdown("""
+    <style>
+    /* Primary style for ALL st.button instances */
+    div.stButton > button:first-child {
+        background-color: #00785D !important;
+        color: white !important;
+        font-size: 1.3rem !important;
+        font-weight: bold !important;
+        padding: 22px 0 !important;
+        width: 100% !important;
+        border-radius: 15px !important;
+        margin-top: 18px !important;
+        margin-bottom: 18px !important;
+        border: 0 !important;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #009874 !important;
+    }
+
+    /* Optional: make the Download button match */
+    div.stDownloadButton > button {
+        background-color: #00785D !important;
+        color: white !important;
+        font-size: 1.1rem !important;
+        font-weight: 700 !important;
+        padding: 14px 20px !important;
+        border-radius: 12px !important;
+        border: 0 !important;
+    }
+    div.stDownloadButton > button:hover {
+        background-color: #009874 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
