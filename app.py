@@ -15,8 +15,8 @@ from datetime import datetime
 import json, re, math
 
 # ------------------------ App + API setup ------------------------
-st.set_page_config(page_title="LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)", layout="wide")
-st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent")
+st.set_page_config(page_title="LCE + 5S Decision Support", layout="wide")
+st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
 st.markdown("Developed by: Dr. J. Isabel Méndez  & Dr. Arturo Molina")
 
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
@@ -191,47 +191,37 @@ class AgentState:
         self.observations = []
 
 # ------------------------ Planner ------------------------
-
 def plan_with_llm(state: AgentState, evidence: str) -> str:
     lce_txt = "\n".join([f"- {s}" for s in state.selected_stages]) if state.selected_stages else "None"
     s_txt  = "\n".join([f"- {d}: L{v}" for d, v in state.five_s_levels.items()])
     dem_js = json.dumps(state.demand_info, ensure_ascii=False)
     doc_snip = (state.docs_text or "")[:TXT_LIMIT]
+    prompt = f"""
+You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.
 
-    # Build the prompt with markers instead of nested triple quotes
-    prompt = (
-        f"You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.\n\n"
-        "Context:\n"
-        f"Objective: {state.objective}\n"
-        "Selected LCE stages:\n"
-        f"{lce_txt}\n"
-        "Current 5S maturity:\n"
-        f"{s_txt}\n"
-        f"Demand/capacity info (if any, JSON): {dem_js}\n"
-        "Relevant document snippets (if any):\n"
-        "<<<DOC>>>\n"
-        f"{doc_snip}\n"
-        "<<<END-DOC>>>\n\n"
-        "Use the evidence strictly:\n"
-        f"{evidence}\n\n"
-        "If capacity observations were provided, include explicit takt time and the number of parallel stations "
-        "in the configuration, layout, staffing, and scheduling decisions.\n\n"
-        "Return the following sections (markdown, concise and actionable):\n"
-        "[Supply Chain Configuration & Action Plan]\n"
-        "[Improvement Opportunities & Risks]\n"
-        "[Digital/AI Next Steps]\n"
-        "[Expected 5S Maturity]  (List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)\n"
-    )
+Context:
+Objective: {state.objective}
+Selected LCE stages:
+{lce_txt}
+Current 5S maturity:
+{s_txt}
+Demand/capacity info (if any, JSON): {dem_js}
+Relevant document snippets (if any):
+"""{doc_snip}"""
 
-    return llm(
-        [
-            {"role": "system", "content": "You are a digital manufacturing systems expert."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        seed=42,
-    )
+Use the evidence strictly:
+{evidence}
 
+If capacity observations were provided, include explicit takt time and the number of parallel stations in the configuration, layout, staffing, and scheduling decisions.
+
+Return the following sections (markdown, concise and actionable):
+[Supply Chain Configuration & Action Plan]
+[Improvement Opportunities & Risks]
+[Digital/AI Next Steps]
+[Expected 5S Maturity]  (List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)
+"""
+    return llm([{"role":"system","content":"You are a digital manufacturing systems expert."},
+                {"role":"user","content":prompt}], temperature=0.2, seed=42)
 
 # ------------------------ Tools ------------------------
 class Tool:
@@ -263,27 +253,17 @@ Return JSON ONLY:
         state.spec_data = js
         return {"tool": self.name, "summary": "Structured specs extracted", "data": js}
 
-
 class DocIntakeLLM(Tool):
     name = "doc_intake"
     def run(self, state):
         if not state.docs_text.strip():
             return {"tool": self.name, "summary":"No documents provided.", "data":{}}
-        text_block = state.docs_text[:TXT_LIMIT]
-        prompt = (
-            "From the following text, extract constraints, required standards, safety/environmental notes, "
-            "and any numeric parameters.\n"
-            "Return JSON ONLY with keys: constraints, standards, safety, parameters.\n"
-            "TEXT:\n"
-            "<<<DOC>>>\n" + text_block + "\n<<<END-DOC>>>"
-        )
-        txt = llm(
-            [
-                {"role":"system","content":"You extract constraints from long docs with concise JSON."},
-                {"role":"user","content":prompt}
-            ],
-            temperature=0.2
-        )
+        prompt = f"""From the following text, extract constraints, required standards, safety/environmental notes, and any numeric parameters.
+Return JSON ONLY with keys: constraints, standards, safety, parameters.
+TEXT:
+"""{state.docs_text[:TXT_LIMIT]}""""""
+        txt = llm([{"role":"system","content":"You extract constraints from long docs with concise JSON."},
+                   {"role":"user","content":prompt}], temperature=0.2)
         try:
             js = json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
         except Exception:
@@ -754,65 +734,75 @@ if res:
         st.plotly_chart(fig_exp, use_container_width=True)
 
     # Capacity
-    st.header("9) Capacity Sizing (from demand inputs)")
     cap = res.get("capacity", {})
+    # Show section only if capacity was actually computed
     if cap and cap.get("takt_sec") is not None:
+        st.header("9) Capacity Sizing (from demand inputs)")
         st.success(f"Computed takt ≈ {cap.get('takt_sec',0):.1f} s | Required parallel stations: {cap.get('stations','?')}")
         st.caption("The agent feeds these into the planner; the plan should echo them in layout/staffing.")
-    else:
-        st.info("No capacity calculated (provide weekly output and cycle time in Step 5).")
 
     # KPI Panel
-    st.header("10) KPI Panel")
     kpis = res.get("kpis", {})
     targets = res.get("kpi_targets", {})
+    any_kpi_input = any([
+        scheduled_time_h>0, runtime_h>0, ideal_cycle_time_s>0,
+        total_count>0, good_count>0, changeover_min>0,
+        energy_kwh_week>0, co2e_kg_week>0, water_l_week>0,
+    ])
+    any_kpi_target = any(v for v in targets.values())
+    computed_has_kpis = any(v is not None for v in kpis.values())
 
-    # Build a tidy KPI table for display
-    def tidy(metric_key, label, unit):
-        val = kpis.get(metric_key)
-        tgt = targets.get(metric_key)
-        status = "—"
-        if val is None and tgt:
-            status = "no data"
-        elif val is not None and tgt:
-            if metric_key in ("OEE_pct","FPY_pct","service_level_pct"):
-                status = "OK" if val >= tgt else "NOT MET"
+    if any_kpi_input or any_kpi_target or computed_has_kpis:
+        st.header("10) KPI Panel")
+        # Build a tidy KPI table for display
+        def tidy(metric_key, label, unit):
+            val = kpis.get(metric_key)
+            tgt = targets.get(metric_key)
+            status = "—"
+            if val is None and tgt:
+                status = "no data"
+            elif val is not None and tgt:
+                if metric_key in ("OEE_pct","FPY_pct","service_level_pct"):
+                    status = "OK" if val >= tgt else "NOT MET"
+                else:
+                    status = "OK" if val <= tgt else "NOT MET"
+            return {"Metric": label, "Value": None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}"),
+                    "Target": None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}"),
+                    "Status": status}
+
+        rows = [
+            tidy("throughput_units_per_h", "Throughput", "units/h"),
+            tidy("OEE_pct", "OEE", "%"),
+            tidy("FPY_pct", "FPY", "%"),
+            tidy("changeover_min", "Changeover", "min"),
+            tidy("energy_kWh_per_unit", "Energy / Unit", "kWh"),
+            tidy("co2e_kg_per_unit", "CO₂e / Unit", "kg"),
+            tidy("water_L_per_unit", "Water / Unit", "L"),
+            tidy("lead_time_days", "Lead Time", "days"),
+            tidy("service_level_pct", "Service Level / Fill Rate", "%"),
+        ]
+        df_kpi = pd.DataFrame(rows)
+        st.dataframe(df_kpi, use_container_width=True)
+
+        # Standards Gate (only if KPI context exists or warnings present)
+        warns = res.get("standards_warnings", [])
+        if warns or any_kpi_input or any_kpi_target:
+            st.header("11) Standards Gate")
+            if warns:
+                st.error("Standards/compliance warnings:
+- " + "
+- ".join(warns))
             else:
-                status = "OK" if val <= tgt else "NOT MET"
-        return {"Metric": label, "Value": None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}"),
-                "Target": None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}"),
-                "Status": status}
+                st.success("Standards Gate: OK")
 
-    rows = [
-        tidy("throughput_units_per_h", "Throughput", "units/h"),
-        tidy("OEE_pct", "OEE", "%"),
-        tidy("FPY_pct", "FPY", "%"),
-        tidy("changeover_min", "Changeover", "min"),
-        tidy("energy_kWh_per_unit", "Energy / Unit", "kWh"),
-        tidy("co2e_kg_per_unit", "CO₂e / Unit", "kg"),
-        tidy("water_L_per_unit", "Water / Unit", "L"),
-        tidy("lead_time_days", "Lead Time", "days"),
-        tidy("service_level_pct", "Service Level / Fill Rate", "%"),
-    ]
-    df_kpi = pd.DataFrame(rows)
-    st.dataframe(df_kpi, use_container_width=True)
-
-    st.header("11) Standards Gate")
-    warns = res.get("standards_warnings", [])
-    if warns:
-        st.error("Standards/compliance warnings:\n- " + "\n- ".join(warns))
-    else:
-        st.success("Standards Gate: OK")
-
-    st.header("12) Risk Register")
+    # Risk Register (only if risks exist)
     risks = res.get("risk_register",{}).get("risks",[])
     if risks:
+        st.header("12) Risk Register")
         df = pd.DataFrame(risks)
         st.dataframe(df, use_container_width=True)
         st.download_button("Download Risk Register (CSV)", df.to_csv(index=False).encode("utf-8"),
                            "risk_register.csv","text/csv")
-    else:
-        st.info("No risks extracted/generated.")
 
 # ------------------------ PDF export ------------------------
 
