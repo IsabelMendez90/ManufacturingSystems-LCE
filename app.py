@@ -154,7 +154,7 @@ def find_5s_gaps(plan_text: str, target_levels: dict) -> list:
     text = plan_text or ""
     gaps = []
     for dim, target in target_levels.items():
-        if target <= 0:
+        if target <= 0:  # show nothing if current level is 0
             continue
         pats = FIVE_S_PATTERNS.get(dim, [])
         hits = set(p for p in pats if re.search(p, text, re.IGNORECASE))
@@ -199,7 +199,7 @@ def extract_expected_levels(text, fallback):
         out[dim] = int(m.group(1)) if m else int(fallback.get(dim, 0))
     return out
 
-# ------------------------ Stage Views helpers (from your earlier code) ------------------------
+# ------------------------ Stage Views helpers ------------------------
 def build_context_block(objective, system_type, industry, five_s_levels, selected_stages, plan_text=""):
     stages_list = [s.split(":")[0].strip() for s in selected_stages]
     five_s_str = ", ".join([f"{k}: {v}" for k, v in five_s_levels.items()])
@@ -341,7 +341,6 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "Sensing: <0-4>\n"
         "Smart: <0-4>\n"
         "Safe: <0-4>\n"
-
     )
     return llm(
         [
@@ -499,7 +498,7 @@ class StandardsGate(Tool):
         targets = {}
         blob = (text or "") + "\n" + "\n".join(success_metrics or [])
         for m in re.finditer(r"\b(OEE|FPY|service level|fill rate)\b.*?(>=|≥|>|=)\s*([0-9]+(?:\.[0-9]+)?)\s*%?", blob, re.IGNORECASE):
-            key = self.KPI_KEY_MAP[m.group(1).lower()]; val = float(m.group(3)); 
+            key = self.KPI_KEY_MAP[m.group(1).lower()]; val = float(m.group(3))
             if val <= 1.0: val *= 100.0
             targets[key] = (">=", val)
         for m in re.finditer(r"\b(lead time)\b.*?(<=|≤|<|=)\s*([0-9]+(?:\.[0-9]+)?)\s*(d|day|days)\b", blob, re.IGNORECASE):
@@ -705,40 +704,12 @@ for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
         techs = five_s_taxonomy[dim][five_s_levels[dim]].get("tech", [])
         if techs: st.caption("Tech hints: " + "; ".join(techs))
 
-# ---------------- MASTER OPS TOGGLE (put this BEFORE any Demand/KPI UI) ----------------
+# ---------------- MASTER OPS TOGGLE (single, before any Demand/KPI UI) ----------------
 ops_enabled = st.toggle(
     "Enable operations inputs (Demand/Capacity + KPI)",
     value=False,
-    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden."
-)
-
-# Safe defaults so later code never breaks when the module is OFF
-use_kpi_inputs = False
-scheduled_time_h = runtime_h = ideal_cycle_time_s = 0.0
-total_count = good_count = 0
-changeover_min = 0.0
-energy_kwh_week = co2e_kg_week = water_l_week = 0.0
-tgt_oee = tgt_fpy = tgt_service = 0.0
-tgt_lead_time = tgt_energy = tgt_co2e = 0.0
-
-# Defaults for demand (used by capacity tool even when hidden)
-demand_info = {
-    "weekly_output": 0,
-    "cycle_time_sec": 0.0,
-    "shifts_per_day": 1,
-    "hours_per_shift": 8.0,
-    "days_per_week": 5,
-    "oee": 0.70,
-}
-
-# ================== Only render Demand/KPI UI when enabled ==================
-
-
-# ---------------- MASTER OPS TOGGLE (put this BEFORE any Demand/KPI UI) ----------------
-ops_enabled = st.toggle(
-    "Enable operations inputs (Demand/Capacity + KPI)",
-    value=False,
-    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden."
+    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden.",
+    key="ops_toggle",
 )
 
 # Safe defaults so later code never breaks when the module is OFF
@@ -820,7 +791,6 @@ kpi_targets = {
     "co2e_kg_per_unit":    tgt_co2e if tgt_co2e > 0 else None,
 }
 
-
 st.header("Optional Upload relevant docs (manuals/specs/SOPs)")
 uploads = st.file_uploader("Upload .txt/.md/.csv/.log/.docx/.pdf (max a few MB). Multiple allowed.",
                            type=["txt","md","csv","log","docx","pdf"], accept_multiple_files=True)
@@ -833,6 +803,9 @@ if uploads:
     docs_text = "\n\n".join(pieces)
 
 # --------------- Run agent ---------------
+# Agent is always on; no UI toggles
+enable_agent = True
+auto_iterate = True
 
 if st.button("Generate Plan & Recommendations"):
     with st.spinner("Agent planning, executing tools, stage views, and refining..."):
@@ -848,8 +821,8 @@ if st.button("Generate Plan & Recommendations"):
             kpi_inputs=kpi_inputs,
             kpi_targets=kpi_targets,
             use_kpi_inputs=use_kpi_inputs,
-            enable_agent=enable_agent,
-            auto_iterate=auto_iterate,
+            enable_agent=enable_agent,   # always True
+            auto_iterate=auto_iterate,   # always True
             max_steps=3,
         )
         st.session_state["agent_result"] = result
