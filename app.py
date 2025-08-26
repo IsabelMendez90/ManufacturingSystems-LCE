@@ -833,9 +833,6 @@ if uploads:
     docs_text = "\n\n".join(pieces)
 
 # --------------- Run agent ---------------
-st.header("Agent Controls")
-enable_agent = st.toggle("Enable Agent Mode (plan → tools → reflect)", value=True)
-auto_iterate = st.toggle("Auto-iterate until pass (standards + 5S coverage)", value=True)
 
 if st.button("Generate Plan & Recommendations"):
     with st.spinner("Agent planning, executing tools, stage views, and refining..."):
