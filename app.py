@@ -334,7 +334,14 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "[Supply Chain Configuration & Action Plan]\n"
         "[Improvement Opportunities & Risks]\n"
         "[Digital/AI Next Steps]\n"
-        "[Expected 5S Maturity]  (List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)\n"
+        "[Expected 5S Maturity]\n"
+        "Provide EXACTLY these five lines using integers 0–4 (no prose, no letters):\n"
+        "Social: <0-4>\n"
+        "Sustainable: <0-4>\n"
+        "Sensing: <0-4>\n"
+        "Smart: <0-4>\n"
+        "Safe: <0-4>\n"
+
     )
     return llm(
         [
@@ -836,8 +843,10 @@ if res:
     st.markdown("**Digital/AI Next Steps**")
     st.info(parse_section(plan_text,"Digital/AI Next Steps") or "—")
     st.markdown("**Expected 5S Maturity**")
-    exp = parse_section(plan_text,"Expected 5S Maturity"); st.info(exp or "—")
-    expected_5s = extract_expected_levels(exp, five_s_levels)
+    exp_raw = parse_section(plan_text, "Expected 5S Maturity")
+    expected_5s = extract_expected_levels(exp_raw, five_s_levels)  # clamps 0–4
+    exp_lines = "\n".join([f"{d}: {expected_5s[d]}" for d in ["Social","Sustainable","Sensing","Smart","Safe"]])
+    st.info(exp_lines)
 
     # 8) 5S Profiles
     st.header("8) 5S Profiles")
@@ -918,9 +927,17 @@ def generate_pdf_report(plan_text, five_s_levels, warnings, risks, cap, kpis, ta
     pdf.cell(0,8,to_latin1("Developed by Dr. Juana Isabel Méndez and Dr. Arturo Molina"), ln=True, align="C")
     pdf.cell(0,8,to_latin1("Date: "+datetime.now().strftime("%Y-%m-%d")), ln=True, align="C")
     pdf.ln(6)
+
     for head in ["Supply Chain Configuration & Action Plan","Improvement Opportunities & Risks","Digital/AI Next Steps","Expected 5S Maturity"]:
         pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1(head), ln=True)
-        pdf.set_font("Arial", size=11); pdf.multi_cell(0,7,to_latin1(parse_section(plan_text, head) or "—")); pdf.ln(2)
+        pdf.set_font("Arial", size=11)
+        if head == "Expected 5S Maturity":
+            exp_raw = parse_section(plan_text, head)
+            exp_levels = extract_expected_levels(exp_raw, five_s_levels)
+            text = "\n".join([f"{d}: {exp_levels[d]}" for d in ["Social","Sustainable","Sensing","Smart","Safe"]])
+        else:
+            text = parse_section(plan_text, head) or "—"
+        pdf.multi_cell(0,7,to_latin1(text)); pdf.ln(2)
     if cap and cap.get("takt_sec") is not None:
         pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1("Capacity Sizing"), ln=True)
         pdf.set_font("Arial", size=11)
