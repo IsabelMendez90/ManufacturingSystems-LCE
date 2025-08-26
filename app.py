@@ -705,37 +705,74 @@ for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
         techs = five_s_taxonomy[dim][five_s_levels[dim]].get("tech", [])
         if techs: st.caption("Tech hints: " + "; ".join(techs))
 
-# 5) Demand & KPI Inputs (Option B toggle)
-st.header("Demand / Capacity Inputs (optional but recommended)")
-c1,c2,c3,c4,c5 = st.columns(5)
-with c1: weekly_output = st.number_input("Target weekly output (units)", min_value=0, value=0)
-with c2: cycle_time_sec = st.number_input("Cycle time per unit (sec)", min_value=0.0, value=0.0, step=1.0)
-with c3: shifts_per_day = st.number_input("Shifts per day", min_value=1, max_value=4, value=1)
-with c4: hours_per_shift = st.number_input("Hours per shift", min_value=1.0, max_value=12.0, value=8.0, step=0.5)
-with c5: days_per_week = st.number_input("Days per week", min_value=1, max_value=7, value=5)
-oee_assumed = st.slider("Assumed OEE for capacity calc (if unknown)", min_value=0.3, max_value=0.95, value=0.7, step=0.05)
-demand_info = {"weekly_output": weekly_output,"cycle_time_sec": cycle_time_sec,"shifts_per_day": shifts_per_day,
-               "hours_per_shift": hours_per_shift,"days_per_week": days_per_week,"oee": oee_assumed}
-
-# ---------------- Toggle to show/hide the KPI module ----------------
-show_kpi = st.toggle(
-    "Enable KPI module (OEE/FPY/ESG inputs + KPI Gate targets)",
+# ---------------- MASTER OPS TOGGLE (put this BEFORE any Demand/KPI UI) ----------------
+ops_enabled = st.toggle(
+    "Enable operations inputs (Demand/Capacity + KPI)",
     value=False,
-    help="Turn on to enter KPI inputs and/or targets. When OFF, sections 5b and 5c are hidden."
+    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden."
 )
 
-# Safe defaults (so later code never crashes if KPI module is OFF)
+# Safe defaults so later code never breaks when the module is OFF
 use_kpi_inputs = False
 scheduled_time_h = runtime_h = ideal_cycle_time_s = 0.0
 total_count = good_count = 0
 changeover_min = 0.0
 energy_kwh_week = co2e_kg_week = water_l_week = 0.0
-
 tgt_oee = tgt_fpy = tgt_service = 0.0
 tgt_lead_time = tgt_energy = tgt_co2e = 0.0
 
-# ----------- 5b) Optional KPI Inputs (only if toggle is ON) ----------
-if show_kpi:
+# Defaults for demand (used by capacity tool even when hidden)
+demand_info = {
+    "weekly_output": 0,
+    "cycle_time_sec": 0.0,
+    "shifts_per_day": 1,
+    "hours_per_shift": 8.0,
+    "days_per_week": 5,
+    "oee": 0.70,
+}
+
+# ================== Only render Demand/KPI UI when enabled ==================
+
+
+# ---------------- MASTER OPS TOGGLE (put this BEFORE any Demand/KPI UI) ----------------
+ops_enabled = st.toggle(
+    "Enable operations inputs (Demand/Capacity + KPI)",
+    value=False,
+    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden."
+)
+
+# Safe defaults so later code never breaks when the module is OFF
+use_kpi_inputs = False
+scheduled_time_h = runtime_h = ideal_cycle_time_s = 0.0
+total_count = good_count = 0
+changeover_min = 0.0
+energy_kwh_week = co2e_kg_week = water_l_week = 0.0
+tgt_oee = tgt_fpy = tgt_service = 0.0
+tgt_lead_time = tgt_energy = tgt_co2e = 0.0
+
+# Defaults for demand (used by capacity tool even when hidden)
+demand_info = {
+    "weekly_output": 0,
+    "cycle_time_sec": 0.0,
+    "shifts_per_day": 1,
+    "hours_per_shift": 8.0,
+    "days_per_week": 5,
+    "oee": 0.70,
+}
+
+# ================== Only render Demand/KPI UI when enabled ==================
+if ops_enabled:
+    # 5a) Demand / Capacity
+    st.header("Demand / Capacity Inputs (optional but recommended)")
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1: demand_info["weekly_output"]   = st.number_input("Target weekly output (units)", min_value=0, value=0)
+    with c2: demand_info["cycle_time_sec"]  = st.number_input("Cycle time per unit (sec)", min_value=0.0, value=0.0, step=1.0)
+    with c3: demand_info["shifts_per_day"]  = st.number_input("Shifts per day", min_value=1, max_value=4, value=1)
+    with c4: demand_info["hours_per_shift"] = st.number_input("Hours per shift", min_value=1.0, max_value=12.0, value=8.0, step=0.5)
+    with c5: demand_info["days_per_week"]   = st.number_input("Days per week", min_value=1, max_value=7, value=5)
+    demand_info["oee"] = st.slider("Assumed OEE for capacity calc (if unknown)", min_value=0.3, max_value=0.95, value=0.7, step=0.05)
+
+    # 5b) KPI Inputs
     st.subheader("Optional KPI Inputs (for OEE/FPY/ESG)")
     with st.expander("Enter KPI inputs if available", expanded=False):
         use_kpi_inputs = st.checkbox("Use KPI inputs", value=False, key="use_kpi_inputs")
@@ -753,14 +790,7 @@ if show_kpi:
             co2e_kg_week    = st.number_input("CO₂e (kg/week)",    0.0, 1e9, 0.0, 1.0)
             water_l_week    = st.number_input("Water (L/week)",    0.0, 1e12, 0.0, 1.0)
 
-kpi_inputs = dict(
-    scheduled_time_h=scheduled_time_h, runtime_h=runtime_h, ideal_cycle_time_s=ideal_cycle_time_s,
-    total_count=total_count, good_count=good_count, changeover_min=changeover_min,
-    energy_kwh_week=energy_kwh_week, co2e_kg_week=co2e_kg_week, water_l_week=water_l_week,
-)
-
-# ----------- 5c) Optional KPI Targets (only if toggle is ON) ----------
-if show_kpi:
+    # 5c) KPI Targets
     st.subheader("Optional KPI Targets (used by KPI Gate)")
     with st.expander("Set targets to enable pass/fail checks", expanded=False):
         t1, t2, t3 = st.columns(3)
@@ -775,14 +805,21 @@ if show_kpi:
         with t3:
             pass  # reserved
 
+# Build dicts used by tools (exist even if ops_enabled=False)
+kpi_inputs = dict(
+    scheduled_time_h=scheduled_time_h, runtime_h=runtime_h, ideal_cycle_time_s=ideal_cycle_time_s,
+    total_count=total_count, good_count=good_count, changeover_min=changeover_min,
+    energy_kwh_week=energy_kwh_week, co2e_kg_week=co2e_kg_week, water_l_week=water_l_week,
+)
 kpi_targets = {
-    "OEE_pct": tgt_oee if tgt_oee > 0 else None,
-    "FPY_pct": tgt_fpy if tgt_fpy > 0 else None,
-    "service_level_pct": tgt_service if tgt_service > 0 else None,
-    "lead_time_days": tgt_lead_time if tgt_lead_time > 0 else None,
+    "OEE_pct":             tgt_oee if tgt_oee > 0 else None,
+    "FPY_pct":             tgt_fpy if tgt_fpy > 0 else None,
+    "service_level_pct":   tgt_service if tgt_service > 0 else None,
+    "lead_time_days":      tgt_lead_time if tgt_lead_time > 0 else None,
     "energy_kWh_per_unit": tgt_energy if tgt_energy > 0 else None,
-    "co2e_kg_per_unit": tgt_co2e if tgt_co2e > 0 else None,
+    "co2e_kg_per_unit":    tgt_co2e if tgt_co2e > 0 else None,
 }
+
 
 st.header("Optional Upload relevant docs (manuals/specs/SOPs)")
 uploads = st.file_uploader("Upload .txt/.md/.csv/.log/.docx/.pdf (max a few MB). Multiple allowed.",
