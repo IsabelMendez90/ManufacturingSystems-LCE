@@ -708,7 +708,7 @@ for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
 ops_enabled = st.toggle(
     "Enable operations inputs (Demand/Capacity + KPI)",
     value=False,
-    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets. When OFF, sections 5a/5b/5c are hidden.",
+    help="Turn on to provide demand/capacity and (optional) KPI inputs & targets.",
     key="ops_toggle",
 )
 
