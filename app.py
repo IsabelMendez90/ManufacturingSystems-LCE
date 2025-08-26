@@ -191,37 +191,47 @@ class AgentState:
         self.observations = []
 
 # ------------------------ Planner ------------------------
+
 def plan_with_llm(state: AgentState, evidence: str) -> str:
     lce_txt = "\n".join([f"- {s}" for s in state.selected_stages]) if state.selected_stages else "None"
     s_txt  = "\n".join([f"- {d}: L{v}" for d, v in state.five_s_levels.items()])
     dem_js = json.dumps(state.demand_info, ensure_ascii=False)
     doc_snip = (state.docs_text or "")[:TXT_LIMIT]
-    prompt = f"""
-You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.
 
-Context:
-Objective: {state.objective}
-Selected LCE stages:
-{lce_txt}
-Current 5S maturity:
-{s_txt}
-Demand/capacity info (if any, JSON): {dem_js}
-Relevant document snippets (if any):
-"""{doc_snip}"""
+    # Build the prompt with markers instead of nested triple quotes
+    prompt = (
+        f"You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.\n\n"
+        "Context:\n"
+        f"Objective: {state.objective}\n"
+        "Selected LCE stages:\n"
+        f"{lce_txt}\n"
+        "Current 5S maturity:\n"
+        f"{s_txt}\n"
+        f"Demand/capacity info (if any, JSON): {dem_js}\n"
+        "Relevant document snippets (if any):\n"
+        "<<<DOC>>>\n"
+        f"{doc_snip}\n"
+        "<<<END-DOC>>>\n\n"
+        "Use the evidence strictly:\n"
+        f"{evidence}\n\n"
+        "If capacity observations were provided, include explicit takt time and the number of parallel stations "
+        "in the configuration, layout, staffing, and scheduling decisions.\n\n"
+        "Return the following sections (markdown, concise and actionable):\n"
+        "[Supply Chain Configuration & Action Plan]\n"
+        "[Improvement Opportunities & Risks]\n"
+        "[Digital/AI Next Steps]\n"
+        "[Expected 5S Maturity]  (List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)\n"
+    )
 
-Use the evidence strictly:
-{evidence}
+    return llm(
+        [
+            {"role": "system", "content": "You are a digital manufacturing systems expert."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+        seed=42,
+    )
 
-If capacity observations were provided, include explicit takt time and the number of parallel stations in the configuration, layout, staffing, and scheduling decisions.
-
-Return the following sections (markdown, concise and actionable):
-[Supply Chain Configuration & Action Plan]
-[Improvement Opportunities & Risks]
-[Digital/AI Next Steps]
-[Expected 5S Maturity]  (List as: Social: X, Sustainable: Y, Sensing: Z, Smart: W, Safe: V.)
-"""
-    return llm([{"role":"system","content":"You are a digital manufacturing systems expert."},
-                {"role":"user","content":prompt}], temperature=0.2, seed=42)
 
 # ------------------------ Tools ------------------------
 class Tool:
@@ -253,17 +263,27 @@ Return JSON ONLY:
         state.spec_data = js
         return {"tool": self.name, "summary": "Structured specs extracted", "data": js}
 
+
 class DocIntakeLLM(Tool):
     name = "doc_intake"
     def run(self, state):
         if not state.docs_text.strip():
             return {"tool": self.name, "summary":"No documents provided.", "data":{}}
-        prompt = f"""From the following text, extract constraints, required standards, safety/environmental notes, and any numeric parameters.
-Return JSON ONLY with keys: constraints, standards, safety, parameters.
-TEXT:
-"""{state.docs_text[:TXT_LIMIT]}""""""
-        txt = llm([{"role":"system","content":"You extract constraints from long docs with concise JSON."},
-                   {"role":"user","content":prompt}], temperature=0.2)
+        text_block = state.docs_text[:TXT_LIMIT]
+        prompt = (
+            "From the following text, extract constraints, required standards, safety/environmental notes, "
+            "and any numeric parameters.\n"
+            "Return JSON ONLY with keys: constraints, standards, safety, parameters.\n"
+            "TEXT:\n"
+            "<<<DOC>>>\n" + text_block + "\n<<<END-DOC>>>"
+        )
+        txt = llm(
+            [
+                {"role":"system","content":"You extract constraints from long docs with concise JSON."},
+                {"role":"user","content":prompt}
+            ],
+            temperature=0.2
+        )
         try:
             js = json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
         except Exception:
