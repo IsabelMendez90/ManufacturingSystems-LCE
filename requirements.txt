@@ -5,3 +5,5 @@ requests
 fpdf
 openai
 kaleido
+python-docx
+pymupdf
