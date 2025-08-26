@@ -408,17 +408,23 @@ class SpecExtractorLLM(Tool):
             "{\n"
             ' "requirements": ["<short bullets>"],\n'
             ' "constraints": ["<standards, compliance, budget, quality if implied>"],\n'
-            ' "success_metrics": ["<if mentioned in text, keep generic (no numbers)>"]\n"
+            ' "success_metrics": ["<if mentioned in text, keep generic (no numbers)>"]\n'
             "}\n"
         )
-        txt = llm([{"role":"system","content":"You turn free text into compact JSON specs."},
-                   {"role":"user","content":prompt}], temperature=0.1)
+        txt = llm(
+            [
+                {"role":"system","content":"You turn free text into compact JSON specs."},
+                {"role":"user","content":prompt}
+            ],
+            temperature=0.1
+        )
         try:
             js = json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
         except Exception:
             js = {"requirements":[],"constraints":[],"success_metrics":[]}
         state.spec_data = js
         return {"tool": self.name, "summary": "Structured specs extracted", "data": js}
+
 
 class DocIntakeLLM(Tool):
     name = "doc_intake"
