@@ -829,6 +829,8 @@ if st.button("Generate Plan & Recommendations"):
 
 # ------------------------ Results ------------------------
 res = st.session_state.get("agent_result")
+ops_enabled_state = st.session_state.get("ops_toggle", False)   # read the master toggle
+
 if res:
     st.header("Results")
     plan_text = res["plan_text"]
@@ -890,54 +892,57 @@ if res:
         fig_exp = px.line_polar(exp_df, r="Level", theta="Dimension", line_close=True, range_r=[0, 4])
         st.plotly_chart(fig_exp, use_container_width=True)
 
-    # 9) Capacity (only if computed)
+    # 9) Capacity (hide unless ops are enabled)
     cap = res.get("capacity", {})
-    if cap and cap.get("takt_sec") is not None:
+    if ops_enabled_state and cap and cap.get("takt_sec") is not None:
         st.header("Capacity Sizing (from demand inputs)")
         st.success(f"Computed takt ≈ {cap.get('takt_sec',0):.1f} s | Required parallel stations: {cap.get('stations','?')}")
         st.caption("The agent feeds these into the planner; the plan should echo them in layout/staffing.")
 
-    # 10) KPI Panel (only when KPI data/targets exist)
-    kpis = res.get("kpis", {}); targets = res.get("kpi_targets", {})
-    any_kpi_input = use_kpi_inputs and any([
-        scheduled_time_h>0, runtime_h>0, ideal_cycle_time_s>0,
-        total_count>0, good_count>0, changeover_min>0,
-        energy_kwh_week>0, co2e_kg_week>0, water_l_week>0,
-    ])
-    any_kpi_target = any(v for v in (targets or {}).values())
-    computed_has_kpis = any(v is not None for v in (kpis or {}).values())
-    if any_kpi_input or any_kpi_target or computed_has_kpis:
-        st.header("KPI Panel")
-        def tidy(metric_key, label, unit):
-            val = kpis.get(metric_key); tgt = targets.get(metric_key); status = "—"
-            if val is None and tgt: status = "no data"
-            elif val is not None and tgt:
-                status = "OK" if (val >= tgt if metric_key in ("OEE_pct","FPY_pct","service_level_pct") else val <= tgt) else "NOT MET"
-            return {"Metric": label, "Value": None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}"),
-                    "Target": None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}"), "Status": status}
-        rows = [
-            tidy("throughput_units_per_h", "Throughput", "units/h"),
-            tidy("OEE_pct", "OEE", "%"),
-            tidy("FPY_pct", "FPY", "%"),
-            tidy("changeover_min", "Changeover", "min"),
-            tidy("energy_kWh_per_unit", "Energy / Unit", "kWh"),
-            tidy("co2e_kg_per_unit", "CO₂e / Unit", "kg"),
-            tidy("water_L_per_unit", "Water / Unit", "L"),
-            tidy("lead_time_days", "Lead Time", "days"),
-            tidy("service_level_pct", "Service Level / Fill Rate", "%"),
-        ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    # 10) KPI Panel (only if operations module is enabled)
+    if ops_enabled_state:
+        kpis = res.get("kpis", {}); targets = res.get("kpi_targets", {})
+        any_kpi_input = use_kpi_inputs and any([
+            scheduled_time_h>0, runtime_h>0, ideal_cycle_time_s>0,
+            total_count>0, good_count>0, changeover_min>0,
+            energy_kwh_week>0, co2e_kg_week>0, water_l_week>0,
+        ])
+        any_kpi_target = any(v for v in (targets or {}).values())
+        computed_has_kpis = any(v is not None for v in (kpis or {}).values())
 
-        # 11) Standards Gate (only if relevant)
-        warns = res.get("standards_warnings", [])
-        if warns or any_kpi_input or any_kpi_target:
-            st.header("Standards Gate")
-            if warns:
-                msg = "Standards/compliance warnings:\n- " + "\n- ".join([str(w) for w in warns])
-                st.error(msg)
-            else:
-                st.success("Standards Gate: OK")
+        if any_kpi_input or any_kpi_target or computed_has_kpis:
+            st.header("KPI Panel")
+            def tidy(metric_key, label, unit):
+                val = kpis.get(metric_key); tgt = targets.get(metric_key); status = "—"
+                if val is None and tgt: status = "no data"
+                elif val is not None and tgt:
+                    up_or_down = metric_key in ("OEE_pct","FPY_pct","service_level_pct")
+                    status = "OK" if ((val >= tgt) if up_or_down else (val <= tgt)) else "NOT MET"
+                return {"Metric": label,
+                        "Value": None if val is None else (f"{val:.3g} {unit}" if unit else f"{val:.3g}"),
+                        "Target": None if not tgt else (f"{tgt:.3g} {unit}" if unit else f"{tgt:.3g}"),
+                        "Status": status}
+            rows = [
+                tidy("throughput_units_per_h","Throughput","units/h"),
+                tidy("OEE_pct","OEE","%"),
+                tidy("FPY_pct","FPY","%"),
+                tidy("changeover_min","Changeover","min"),
+                tidy("energy_kWh_per_unit","Energy / Unit","kWh"),
+                tidy("co2e_kg_per_unit","CO₂e / Unit","kg"),
+                tidy("water_L_per_unit","Water / Unit","L"),
+                tidy("lead_time_days","Lead Time","days"),
+                tidy("service_level_pct","Service Level / Fill Rate","%"),
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
+            # 11) Standards Gate (only when ops are enabled)
+            warns = res.get("standards_warnings", [])
+            if warns or any_kpi_input or any_kpi_target:
+                st.header("Standards Gate")
+                if warns:
+                    st.error("Standards/compliance warnings:\n- " + "\n- ".join([str(w) for w in warns]))
+                else:
+                    st.success("Standards Gate: OK")
     # 12) Risk Register (only if exists)
     risks = res.get("risk_register",{}).get("risks",[])
     if risks:
