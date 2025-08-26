@@ -789,9 +789,8 @@ if res:
         if warns or any_kpi_input or any_kpi_target:
             st.header("11) Standards Gate")
             if warns:
-                st.error("Standards/compliance warnings:
-- " + "
-- ".join(warns))
+                msg = "Standards/compliance warnings:\n- " + "\n- ".join([str(w) for w in warns])
+                st.error(msg)
             else:
                 st.success("Standards Gate: OK")
 
