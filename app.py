@@ -199,6 +199,40 @@ def find_5s_gaps(plan_text: str, target_levels: dict) -> list:
             gaps.append(f"{dim}: need ≥{need} concrete references; found {len(hits)}. Add: {', '.join(sample)}")
     return gaps
 
+# ------------------------ Structure + LCE stage verifiers ------------------------
+REQUIRED_SECTIONS = [
+    "Supply Chain Configuration & Action Plan",
+    "Improvement Opportunities & Risks",
+    "Digital/AI Next Steps",
+    "Expected 5S Maturity",
+]
+
+def find_structure_gaps(plan_text: str) -> list:
+    gaps = []
+    for head in REQUIRED_SECTIONS:
+        body = parse_section(plan_text, head)
+        if not body:
+            gaps.append(f"Missing or empty section: [{head}]")
+    # Ensure Expected 5S lines are explicit
+    exp = parse_section(plan_text, "Expected 5S Maturity")
+    if exp:
+        for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+            pat = rf"{dim}\s*[:\-]?\s*(?:L(?:e?vel)?\s*=?\s*)?[0-4]"
+            if not re.search(pat, exp, flags=re.IGNORECASE):
+                gaps.append(f"Expected 5S line missing: {dim}: <0-4>")
+    return gaps
+
+def find_lce_stage_gaps(plan_text: str, selected_stages: list) -> list:
+    gaps = []
+    if not selected_stages:
+        return gaps
+    text = plan_text or ""
+    stage_keys = [s.split(":")[0].strip() for s in selected_stages]
+    for stage in stage_keys:
+        if not re.search(rf"\\b{re.escape(stage)}\\b", text, flags=re.IGNORECASE):
+            gaps.append(f"LCE stage not mentioned in plan: {stage}")
+    return gaps
+
 # ------------------------ Evidence builder ------------------------
 def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_levels):
     stages = [s.split(":")[0].strip() for s in selected_stages] or []
@@ -506,7 +540,10 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         plan_text = plan_with_llm(state, evidence)
         # Reflector (coverage critic on the SC plan section)
         sc_text = parse_section(plan_text, "Supply Chain Configuration & Action Plan") or plan_text
-        gaps = find_5s_gaps(sc_text, five_s_levels)
+        gaps = []
+        gaps += find_5s_gaps(sc_text, five_s_levels)
+        gaps += find_structure_gaps(plan_text)
+        gaps += find_lce_stage_gaps(sc_text, selected_stages)
 
         # Tools (bounded set)
         run_tools = []
@@ -519,13 +556,13 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
             observations.append(out)
 
         # Decide whether to iterate
-        passed_5s = (len(gaps) == 0)
-        if not enable_agent or not auto_iterate or passed_5s:
+        passed_verify = (len(gaps) == 0)
+        if not enable_agent or not auto_iterate or passed_verify:
             evidence += "\n\n[OBSERVATIONS]\n" + "\n".join([f"- {o['tool']}: {o['summary']}" for o in observations])
             break
         critic = []
-        if not passed_5s:
-            critic.append("5S COVERAGE FINDINGS:\n- " + "\n- ".join(gaps[:10]))
+        if not passed_verify:
+            critic.append("VERIFICATION FINDINGS:\n- " + "\n- ".join(gaps[:10]))
         evidence += "\n\n[NEEDS FIX — ADDRESS IN NEXT PASS]\n" + "\n\n".join(critic)
 
     # Stage Views pass
