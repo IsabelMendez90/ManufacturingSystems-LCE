@@ -14,6 +14,8 @@ from fpdf import FPDF
 from io import BytesIO
 from datetime import datetime
 import json, re
+import math
+import random
 
 # ------------------------ App + API setup ------------------------
 st.set_page_config(page_title="LCE + 5S", layout="wide")
@@ -59,6 +61,19 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
+
+# ------------------------ Evaluation metrics (optional) ------------------------
+EVAL_SOURCES = ["Measured", "Simulated", "Estimated", "Illustrative (example only)"]
+EVAL_METRICS = [
+    {"category": "Social", "metric": "Training hours per employee", "unit": "hours/employee/year", "direction": "higher", "driver": "Social", "min": 5, "max": 60},
+    {"category": "Sustainable", "metric": "Energy per unit", "unit": "kWh/unit", "direction": "lower", "driver": "Sustainable", "min": 10, "max": 100},
+    {"category": "Sustainable", "metric": "CO2e per unit", "unit": "kg CO2e/unit", "direction": "lower", "driver": "Sustainable", "min": 1, "max": 20},
+    {"category": "Sensing", "metric": "Sensor coverage", "unit": "% of critical assets", "direction": "higher", "driver": "Sensing", "min": 10, "max": 100},
+    {"category": "Smart", "metric": "OEE", "unit": "%", "direction": "higher", "driver": "Smart", "min": 40, "max": 90},
+    {"category": "Safe", "metric": "TRIR", "unit": "cases per 200k hours", "direction": "lower", "driver": "Safe", "min": 0.2, "max": 6.0},
+    {"category": "Supply Chain", "metric": "Lead time", "unit": "days", "direction": "lower", "driver": "SC", "min": 5, "max": 40},
+    {"category": "Supply Chain", "metric": "WIP", "unit": "units", "direction": "lower", "driver": "SC", "min": 50, "max": 2000},
+]
 
 # ------------------------ Helpers: file text extraction (best-effort) ------------------------
 def try_extract_text(uploaded_file) -> str:
@@ -272,6 +287,97 @@ def parse_section(text, head):
     start = matches[idx].end()
     end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
     return text[start:end].strip()
+
+# ------------------------ Evaluation helpers ------------------------
+def _to_float(x):
+    if x is None:
+        return None
+    if isinstance(x, float) and math.isnan(x):
+        return None
+    if pd.isna(x):
+        return None
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+def compute_eval_results(df):
+    rows = []
+    for _, r in df.iterrows():
+        b = _to_float(r.get("Baseline"))
+        p = _to_float(r.get("Proposed"))
+        if b is None or p is None:
+            continue
+        delta = p - b
+        direction = (r.get("Direction") or "").lower()
+        # Improvement: positive = better
+        if direction == "higher":
+            improve = (delta / b * 100.0) if b != 0 else None
+        elif direction == "lower":
+            improve = ((b - p) / b * 100.0) if b != 0 else None
+        else:
+            improve = (delta / b * 100.0) if b != 0 else None
+        rows.append({
+            "Category": r.get("Category"),
+            "Metric": r.get("Metric"),
+            "Unit": r.get("Unit"),
+            "Baseline": b,
+            "Proposed": p,
+            "Δ": delta,
+            "Improvement (%)": improve,
+            "Source": r.get("Source"),
+        })
+    return rows
+
+def _maturity_index(levels: dict, driver: str) -> float:
+    if not levels:
+        return 0.0
+    if driver in levels:
+        return float(levels.get(driver, 0)) / 4.0
+    if driver == "SC":
+        dims = ["Smart", "Sensing", "Sustainable"]
+        vals = [float(levels.get(d, 0)) / 4.0 for d in dims]
+        return sum(vals) / len(vals)
+    if driver == "ALL":
+        vals = [float(v) / 4.0 for v in levels.values()]
+        return sum(vals) / len(vals) if vals else 0.0
+    return 0.0
+
+def synthesize_metrics(current_5s: dict, expected_5s: dict, noise_pct: float = 5.0, seed: int = 42):
+    rng = random.Random(seed)
+    rows = []
+    for m in EVAL_METRICS:
+        driver = m.get("driver", "ALL")
+        cur_idx = _maturity_index(current_5s, driver)
+        exp_idx = _maturity_index(expected_5s or current_5s, driver)
+        lo = float(m.get("min", 0))
+        hi = float(m.get("max", 1))
+        direction = (m.get("direction") or "").lower()
+        # Map maturity index to metric range
+        if direction == "higher":
+            baseline = lo + (hi - lo) * cur_idx
+            proposed = lo + (hi - lo) * exp_idx
+        else:  # lower is better
+            baseline = hi - (hi - lo) * cur_idx
+            proposed = hi - (hi - lo) * exp_idx
+        # Add small synthetic variability
+        def jitter(x):
+            if noise_pct <= 0:
+                return x
+            factor = 1.0 + rng.uniform(-noise_pct, noise_pct) / 100.0
+            return max(0.0, x * factor)
+        baseline = jitter(baseline)
+        proposed = jitter(proposed)
+        rows.append({
+            "Category": m["category"],
+            "Metric": m["metric"],
+            "Unit": m["unit"],
+            "Direction": m["direction"],
+            "Baseline": round(baseline, 3),
+            "Proposed": round(proposed, 3),
+            "Source": "Illustrative (example only)",
+        })
+    return pd.DataFrame(rows)
 
 def extract_expected_levels(text, fallback):
     out = {}
@@ -783,6 +889,59 @@ if res:
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
+    # ================================
+    # Evaluation metrics (optional)
+    # ================================
+    st.header("Evaluation (optional)")
+    st.caption(
+        "Enter baseline and proposed values for evaluation metrics. "
+        "Proposed values represent the expected scenario after applying the plan. "
+        "Select the data source (measured, simulated, estimated, or illustrative)."
+    )
+
+    if "eval_df" not in st.session_state:
+        base = pd.DataFrame(EVAL_METRICS)
+        base = base.rename(columns={
+            "category": "Category",
+            "metric": "Metric",
+            "unit": "Unit",
+            "direction": "Direction",
+        })
+        base["Baseline"] = None
+        base["Proposed"] = None
+        base["Source"] = EVAL_SOURCES[-1]
+        st.session_state["eval_df"] = base
+
+    with st.expander("Auto-generate illustrative metrics from 5S levels"):
+        st.caption(
+            "This generates synthetic baseline/proposed values from current and expected 5S levels. "
+            "Use only for illustration unless you have measured or simulated data."
+        )
+        noise = st.slider("Synthetic variability (%)", min_value=0, max_value=20, value=5, step=1)
+        if st.button("Generate synthetic baseline/proposed"):
+            synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=noise, seed=42)
+            st.session_state["eval_df"] = synth
+
+    edited = st.data_editor(
+        st.session_state["eval_df"],
+        num_rows="fixed",
+        use_container_width=True,
+        column_config={
+            "Baseline": st.column_config.NumberColumn("Baseline"),
+            "Proposed": st.column_config.NumberColumn("Proposed"),
+            "Source": st.column_config.SelectboxColumn("Source", options=EVAL_SOURCES),
+        },
+        disabled=["Category", "Metric", "Unit", "Direction"],
+    )
+    st.session_state["eval_df"] = edited
+
+    eval_rows = compute_eval_results(edited)
+    st.session_state["eval_results"] = eval_rows
+    if eval_rows:
+        out_df = pd.DataFrame(eval_rows)
+        st.subheader("Evaluation Summary")
+        st.dataframe(out_df, use_container_width=True)
+
     # 7) 5S Profiles
     st.header("5S Profiles")
     profiles_box = st.container()
@@ -884,7 +1043,7 @@ def to_latin1(text):
     if not isinstance(text,str): text=str(text)
     return text.encode('latin-1','replace').decode('latin-1')
 
-def generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s):
+def generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s, eval_rows=None):
     pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", size=12)
     pdf.cell(0,10,to_latin1("LCE + 5S Manufacturing Decision Support (Bounded AI Agent)"), ln=True, align="C")
     pdf.set_font("Arial", size=11)
@@ -909,6 +1068,25 @@ def generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s):
             for b in bullets[:2]:
                 pdf.multi_cell(0,6,to_latin1(f"- {dim}: {b}"))
 
+    if eval_rows:
+        pdf.ln(2)
+        pdf.set_font("Arial","B",12); pdf.cell(0,8,to_latin1("Evaluation Metrics (optional)"), ln=True)
+        pdf.set_font("Arial", size=10)
+        for r in eval_rows:
+            metric = r.get("Metric","")
+            unit = r.get("Unit","")
+            baseline = r.get("Baseline")
+            proposed = r.get("Proposed")
+            delta = r.get("Δ")
+            improve = r.get("Improvement (%)")
+            source = r.get("Source","")
+            line = f"- {metric} ({unit}): baseline={baseline}, proposed={proposed}, Δ={delta}"
+            if improve is not None:
+                line += f", improvement={improve:.1f}%"
+            if source:
+                line += f", source={source}"
+            pdf.multi_cell(0,6,to_latin1(line))
+
     buf = BytesIO(); pdf_bytes = pdf.output(dest='S').encode('latin1')
     buf.write(pdf_bytes); buf.seek(0); return buf
 
@@ -918,6 +1096,7 @@ if res:
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
     expected_5s = extract_expected_levels(exp_raw, five_s_levels)
     why_5s = st.session_state.get("why_5s", {})
-    pdf_buf = generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s)
+    eval_rows = st.session_state.get("eval_results", [])
+    pdf_buf = generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s, eval_rows=eval_rows)
     st.download_button("Download Full Report (PDF)", data=pdf_buf,
                        file_name=f"{datetime.now():%Y-%m-%d}_AI_Agent_NoBOM_Report.pdf", mime="application/pdf")
