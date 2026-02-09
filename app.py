@@ -253,8 +253,25 @@ def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_leve
 
 # ------------------------ Plan parsing helpers ------------------------
 def parse_section(text, head):
-    m = re.search(rf"\[{re.escape(head)}\](.*?)(?=\n\[[A-Z].*?\]|\Z)", text or "", re.DOTALL)
-    return m.group(1).strip() if m else ""
+    if not text:
+        return ""
+    # Match headings like:
+    # [Section], ### [Section], **[Section]**, ### **[Section]**
+    header_any = re.compile(r"^\s*(?:#+\s*)?(?:\*\*)?\[([^\]]+)\](?:\*\*)?\s*$", re.MULTILINE)
+    matches = list(header_any.finditer(text))
+    if not matches:
+        return ""
+    target = head.strip().lower()
+    idx = None
+    for i, m in enumerate(matches):
+        if m.group(1).strip().lower() == target:
+            idx = i
+            break
+    if idx is None:
+        return ""
+    start = matches[idx].end()
+    end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+    return text[start:end].strip()
 
 def extract_expected_levels(text, fallback):
     out = {}
@@ -443,6 +460,7 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "[Improvement Opportunities & Risks]\n"
         "[Digital/AI Next Steps]\n"
         "[Expected 5S Maturity]\n"
+        "Format rule: each heading must appear on its own line exactly as shown above (no extra markdown around it).\n"
         "Provide EXACTLY these five lines using integers 0–4 (no prose, no letters):\n"
         "Social: <0-4>\n"
         "Sustainable: <0-4>\n"
