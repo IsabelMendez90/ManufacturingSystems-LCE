@@ -536,7 +536,9 @@ def explain_expected_levels(objective, system_type, industry, selected_stages,
 
     prompt = (
         "Explain concisely WHY each 5S dimension improves from current to expected, using ONLY evidence in the "
-        "plan sections above (specific actions, technologies, standards). No generic phrases.\n\n"
+        "plan sections above (specific actions, technologies, standards). No generic phrases.\n"
+        "If expected equals current, return a brief justification for maintaining the level "
+        "(e.g., no explicit actions identified to increase that dimension).\n\n"
         "Return JSON ONLY with this exact shape:\n" + shape
     )
 
@@ -549,9 +551,23 @@ def explain_expected_levels(objective, system_type, industry, selected_stages,
     )
 
     try:
-        return json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
+        data = json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
     except Exception:
-        return {}
+        data = {}
+    # Fallbacks for missing or empty rationales
+    out = {}
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        cur = int(five_s_levels.get(dim, 0))
+        exp = int(expected_5s.get(dim, cur))
+        entry = (data.get(dim, {}) or {})
+        reasons = entry.get("why", []) or []
+        if not reasons:
+            if exp == cur:
+                reasons = [f"No explicit actions found to increase {dim}; maintain current level."]
+            else:
+                reasons = [f"Rationale not returned; please regenerate or refine plan evidence for {dim}."]
+        out[dim] = {"current": cur, "expected": exp, "why": reasons[:2]}
+    return out
 
 # ------------------------ Agent state ------------------------
 class AgentState:
@@ -908,6 +924,11 @@ if res:
         exp = expected_5s.get(dim, cur)
         delta = exp - cur
         reasons = (why_5s.get(dim, {}) or {}).get("why", []) or []
+        def _clean_reason(s: str) -> str:
+            s = re.sub(r"[*_`]", "", str(s))
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+        reasons = [_clean_reason(r) for r in reasons if r]
         rows.append({
             "Dimension": dim,
             "Current": cur,
