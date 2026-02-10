@@ -108,7 +108,7 @@ def try_extract_text(uploaded_file) -> str:
     return ""
 
 # ------------------------ LLM wrapper ------------------------
-def llm(msgs, temperature=0.0, seed=42, model="mistralai/mistral-7b-instruct"):
+def llm(msgs, temperature=0.2, seed=42, model="mistralai/mistral-7b-instruct"):
     resp = client.chat.completions.create(model=model, temperature=temperature, seed=seed, messages=msgs)
     return resp.choices[0].message.content or ""
 
