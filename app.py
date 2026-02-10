@@ -2,9 +2,7 @@
 # Authors: Dr. J. Isabel Méndez & Dr. Arturo Molina
 # Notes:
 # - Bounded AI AGENT (planner → tools → reflector) that USES an LLM.
-# - Not "agentic AI" (no autonomous long-horizon self-planning/memory).
 # - LCE Stage selection and Stage Views (Function/Org/Info/Resource/Performance).
-# - Adds "Expected 5S Maturity" rationales (evidence-based, per S).
 
 import streamlit as st
 import pandas as pd
@@ -14,6 +12,7 @@ from fpdf import FPDF
 from io import BytesIO
 from datetime import datetime
 import json, re
+import hashlib
 import math
 import random
 
@@ -109,7 +108,7 @@ def try_extract_text(uploaded_file) -> str:
     return ""
 
 # ------------------------ LLM wrapper ------------------------
-def llm(msgs, temperature=0.2, seed=42, model="mistralai/mistral-7b-instruct"):
+def llm(msgs, temperature=0.0, seed=42, model="mistralai/mistral-7b-instruct"):
     resp = client.chat.completions.create(model=model, temperature=temperature, seed=seed, messages=msgs)
     return resp.choices[0].message.content or ""
 
@@ -287,6 +286,20 @@ def parse_section(text, head):
     start = matches[idx].end()
     end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
     return text[start:end].strip()
+
+def _cache_key(objective, system_type, industry, role, selected_stages, five_s_levels, docs_text):
+    doc_hash = hashlib.sha256((docs_text or "").encode("utf-8")).hexdigest()
+    payload = {
+        "objective": objective,
+        "system_type": system_type,
+        "industry": industry,
+        "role": role,
+        "selected_stages": selected_stages or [],
+        "five_s_levels": five_s_levels or {},
+        "docs_hash": doc_hash,
+    }
+    raw = json.dumps(payload, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 # ------------------------ Evaluation helpers ------------------------
 def _to_float(x):
@@ -760,7 +773,7 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
 # ------------------------ UI ------------------------
 
 # 1) Objective / Industry / Role
-st.header("Define Scenario")
+st.header("1. Define Scenario")
 objective = st.text_input(
     "Objective (e.g., launch new product, adopt a new process, expand a facility):",
     value=st.session_state.get("objective", "Design and ramp a flexible small manufacturing cell."),
@@ -783,12 +796,12 @@ if role_selected == "Other":
 st.session_state["role_idx"] = role_options.index("Other") if role_selected=="Other" else role_options.index(role_selected)
 
 # 2) Manufacturing System Type
-st.header("Select Manufacturing System Type")
+st.header("2. Select Manufacturing System Type")
 system_types = ["Product Transfer","Technology Transfer","Facility Design"]
 system_type = st.radio("Manufacturing system type:", system_types, key="system_type")
 
 # 3) Select LCE Stages/Actions
-st.header("Select Relevant LCE Stages/Actions")
+st.header("3. Select Relevant LCE Stages/Actions")
 lce_global_keys = ["Ideation","Basic Development","Advanced Development","Launching","End-of-Life"]
 if "lce_global_checked" not in st.session_state:
     st.session_state["lce_global_checked"] = [False]*len(lce_global_keys)
@@ -804,7 +817,7 @@ for i, action in enumerate(lce_actions):
 st.session_state["selected_stages"] = selected_stages
 
 # 4) 5S Maturity
-st.header("Current 5S Maturity (one per S)")
+st.header("4. Current 5S Maturity (one per S)")
 five_s_levels={}
 cols = st.columns(5)
 for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
@@ -835,21 +848,30 @@ auto_iterate = True
 
 if st.button("Generate Plan & Recommendations"):
     with st.spinner("Agent planning, executing tools, stage views, and refining..."):
-        result = agent_run(
-            objective=objective,
-            system_type=system_type,
-            industry=industry,
-            role=role_selected,
-            selected_stages=selected_stages,
-            five_s_levels=five_s_levels,
-            docs_text=docs_text,
-            enable_agent=enable_agent,   # always True
-            auto_iterate=auto_iterate,   # always True
-            max_steps=3,
+        cache_key = _cache_key(
+            objective, system_type, industry, role_selected,
+            selected_stages, five_s_levels, docs_text
         )
+        st.session_state["current_cache_key"] = cache_key
+        if "plan_cache" not in st.session_state:
+            st.session_state["plan_cache"] = {}
+        if cache_key in st.session_state["plan_cache"]:
+            result = st.session_state["plan_cache"][cache_key]
+        else:
+            result = agent_run(
+                objective=objective,
+                system_type=system_type,
+                industry=industry,
+                role=role_selected,
+                selected_stages=selected_stages,
+                five_s_levels=five_s_levels,
+                docs_text=docs_text,
+                enable_agent=enable_agent,   # always True
+                auto_iterate=auto_iterate,   # always True
+                max_steps=3,
+            )
+            st.session_state["plan_cache"][cache_key] = result
         st.session_state["agent_result"] = result
-        # Clear cached rationales on new run
-        st.session_state.pop("why_5s", None)
 
 # ------------------------ Results ------------------------
 res = st.session_state.get("agent_result")
@@ -905,7 +927,10 @@ if res:
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
     expected_5s = extract_expected_levels(exp_raw, five_s_levels)
 
-    why_5s = st.session_state.get("why_5s")
+    cache_key = st.session_state.get("current_cache_key")
+    if "why_cache" not in st.session_state:
+        st.session_state["why_cache"] = {}
+    why_5s = st.session_state["why_cache"].get(cache_key) if cache_key else None
     if not why_5s:
         why_5s = explain_expected_levels(
             objective=objective,
@@ -916,7 +941,8 @@ if res:
             expected_5s=expected_5s,
             plan_text=plan_text
         )
-        st.session_state["why_5s"] = why_5s
+        if cache_key:
+            st.session_state["why_cache"][cache_key] = why_5s
 
     rows = []
     for dim in ["Social","Sustainable","Sensing","Smart","Safe"]:
@@ -964,15 +990,14 @@ if res:
         base["Source"] = EVAL_SOURCES[-1]
         st.session_state["eval_df"] = base
 
-    with st.expander("Auto-generate illustrative metrics from 5S levels"):
-        st.caption(
-            "Generates synthetic data with baseline from current 5S levels and proposed from expected "
-            "maturity, using a fixed ±5% variability. Use only for illustration unless you have "
-            "measured or simulated data."
-        )
-        if st.button("Generate synthetic metrics"):
-            synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=5.0, seed=42)
-            st.session_state["eval_df"] = synth
+    st.caption(
+        "Auto-generate illustrative metrics: baseline from current 5S levels and proposed from expected "
+        "maturity, using a fixed ±5% variability. Use only for illustration unless you have "
+        "measured or simulated data."
+    )
+    if st.button("Generate synthetic metrics"):
+        synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=5.0, seed=42)
+        st.session_state["eval_df"] = synth
 
     with st.expander("Edit metric inputs (optional)"):
         auto_prop = st.checkbox(
