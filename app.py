@@ -2,9 +2,8 @@
 # Authors: Dr. J. Isabel Méndez & Dr. Arturo Molina
 # Notes:
 # - Bounded AI AGENT (planner → tools → reflector) that USES an LLM.
-# - Not "agentic AI" (no autonomous long-horizon self-planning/memory).
 # - LCE Stage selection and Stage Views (Function/Org/Info/Resource/Performance).
-# - Adds "Expected 5S Maturity" rationales (evidence-based, per S).
+
 
 import streamlit as st
 import pandas as pd
@@ -321,10 +320,10 @@ def compute_eval_results(df):
             "Category": r.get("Category"),
             "Metric": r.get("Metric"),
             "Unit": r.get("Unit"),
-            "Baseline": b,
-            "Proposed": p,
-            "Δ": delta,
-            "Improvement (%)": improve,
+            "Baseline": round(b, 1),
+            "Proposed": round(p, 1),
+            "Δ": round(delta, 1),
+            "Improvement (%)": None if improve is None else round(improve, 1),
             "Source": r.get("Source"),
         })
     return rows
@@ -342,6 +341,9 @@ def _maturity_index(levels: dict, driver: str) -> float:
         vals = [float(v) / 4.0 for v in levels.values()]
         return sum(vals) / len(vals) if vals else 0.0
     return 0.0
+
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
 
 def synthesize_metrics(current_5s: dict, expected_5s: dict, noise_pct: float = 5.0, seed: int = 42):
     rng = random.Random(seed)
@@ -373,11 +375,33 @@ def synthesize_metrics(current_5s: dict, expected_5s: dict, noise_pct: float = 5
             "Metric": m["metric"],
             "Unit": m["unit"],
             "Direction": m["direction"],
-            "Baseline": round(baseline, 3),
-            "Proposed": round(proposed, 3),
+            "Baseline": round(baseline, 1),
+            "Proposed": round(proposed, 1),
             "Source": "Illustrative (example only)",
         })
     return pd.DataFrame(rows)
+
+def compute_proposed_from_baseline(df, current_5s: dict, expected_5s: dict):
+    out = df.copy()
+    for i, r in out.iterrows():
+        b = _to_float(r.get("Baseline"))
+        if b is None:
+            continue
+        direction = (r.get("Direction") or "").lower()
+        driver = r.get("Driver") or r.get("driver") or "ALL"
+        lo = float(r.get("Min") or r.get("min") or 0)
+        hi = float(r.get("Max") or r.get("max") or 1)
+        cur_idx = _maturity_index(current_5s, driver)
+        exp_idx = _maturity_index(expected_5s or current_5s, driver)
+        delta = max(0.0, exp_idx - cur_idx)
+        # Move baseline toward best value by delta fraction
+        if direction == "higher":
+            proposed = b + (hi - b) * delta
+        else:  # lower is better
+            proposed = b - (b - lo) * delta
+        proposed = _clamp(proposed, lo, hi)
+        out.at[i, "Proposed"] = round(proposed, 1)
+    return out
 
 def extract_expected_levels(text, fallback):
     out = {}
@@ -892,7 +916,7 @@ if res:
     # ================================
     # Evaluation metrics (optional)
     # ================================
-    st.header("Evaluation (optional)")
+    st.header("Metric Evaluation")
     st.caption(
         "Enter baseline and proposed values for evaluation metrics. "
         "Proposed values represent the expected scenario after applying the plan. "
@@ -906,6 +930,9 @@ if res:
             "metric": "Metric",
             "unit": "Unit",
             "direction": "Direction",
+            "driver": "Driver",
+            "min": "Min",
+            "max": "Max",
         })
         base["Baseline"] = None
         base["Proposed"] = None
@@ -914,15 +941,19 @@ if res:
 
     with st.expander("Auto-generate illustrative metrics from 5S levels"):
         st.caption(
-            "Generates synthetic baseline/proposed values from current and expected 5S levels "
-            "using a fixed ±5% variability. Use only for illustration unless you have measured "
-            "or simulated data."
+            "Generates synthetic data with baseline from current 5S levels and proposed from expected "
+            "maturity, using a fixed ±5% variability. Use only for illustration unless you have "
+            "measured or simulated data."
         )
-        if st.button("Generate synthetic baseline/proposed"):
+        if st.button("Generate synthetic metrics"):
             synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=5.0, seed=42)
             st.session_state["eval_df"] = synth
 
-    with st.expander("Edit evaluation inputs (optional)"):
+    with st.expander("Edit metric inputs (optional)"):
+        auto_prop = st.checkbox(
+            "Auto-calculate proposed from baseline using expected 5S maturity",
+            value=True,
+        )
         edited = st.data_editor(
             st.session_state["eval_df"],
             num_rows="fixed",
@@ -932,8 +963,10 @@ if res:
                 "Proposed": st.column_config.NumberColumn("Proposed"),
                 "Source": st.column_config.SelectboxColumn("Source", options=EVAL_SOURCES),
             },
-            disabled=["Category", "Metric", "Unit", "Direction"],
+            disabled=["Category", "Metric", "Unit", "Direction", "Driver", "Min", "Max"],
         )
+        if auto_prop:
+            edited = compute_proposed_from_baseline(edited, five_s_levels, expected_5s)
         st.session_state["eval_df"] = edited
 
     eval_rows = compute_eval_results(st.session_state["eval_df"])
