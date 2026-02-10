@@ -914,33 +914,36 @@ if res:
 
     with st.expander("Auto-generate illustrative metrics from 5S levels"):
         st.caption(
-            "This generates synthetic baseline/proposed values from current and expected 5S levels. "
-            "Use only for illustration unless you have measured or simulated data."
+            "Generates synthetic baseline/proposed values from current and expected 5S levels "
+            "using a fixed ±5% variability. Use only for illustration unless you have measured "
+            "or simulated data."
         )
-        noise = st.slider("Synthetic variability (%)", min_value=0, max_value=20, value=5, step=1)
         if st.button("Generate synthetic baseline/proposed"):
-            synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=noise, seed=42)
+            synth = synthesize_metrics(five_s_levels, expected_5s, noise_pct=5.0, seed=42)
             st.session_state["eval_df"] = synth
 
-    edited = st.data_editor(
-        st.session_state["eval_df"],
-        num_rows="fixed",
-        use_container_width=True,
-        column_config={
-            "Baseline": st.column_config.NumberColumn("Baseline"),
-            "Proposed": st.column_config.NumberColumn("Proposed"),
-            "Source": st.column_config.SelectboxColumn("Source", options=EVAL_SOURCES),
-        },
-        disabled=["Category", "Metric", "Unit", "Direction"],
-    )
-    st.session_state["eval_df"] = edited
+    with st.expander("Edit evaluation inputs (optional)"):
+        edited = st.data_editor(
+            st.session_state["eval_df"],
+            num_rows="fixed",
+            use_container_width=True,
+            column_config={
+                "Baseline": st.column_config.NumberColumn("Baseline"),
+                "Proposed": st.column_config.NumberColumn("Proposed"),
+                "Source": st.column_config.SelectboxColumn("Source", options=EVAL_SOURCES),
+            },
+            disabled=["Category", "Metric", "Unit", "Direction"],
+        )
+        st.session_state["eval_df"] = edited
 
-    eval_rows = compute_eval_results(edited)
+    eval_rows = compute_eval_results(st.session_state["eval_df"])
     st.session_state["eval_results"] = eval_rows
     if eval_rows:
         out_df = pd.DataFrame(eval_rows)
         st.subheader("Evaluation Summary")
         st.dataframe(out_df, use_container_width=True)
+    else:
+        st.info("No evaluation metrics entered yet. Use the generator or edit inputs above.")
 
     # 7) 5S Profiles
     st.header("5S Profiles")
