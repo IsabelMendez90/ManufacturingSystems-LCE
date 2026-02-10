@@ -2,8 +2,9 @@
 # Authors: Dr. J. Isabel Méndez & Dr. Arturo Molina
 # Notes:
 # - Bounded AI AGENT (planner → tools → reflector) that USES an LLM.
+# - Not "agentic AI" (no autonomous long-horizon self-planning/memory).
 # - LCE Stage selection and Stage Views (Function/Org/Info/Resource/Performance).
-
+# - Adds "Expected 5S Maturity" rationales (evidence-based, per S).
 
 import streamlit as st
 import pandas as pd
@@ -367,14 +368,17 @@ def synthesize_metrics(current_5s: dict, expected_5s: dict, noise_pct: float = 5
             if noise_pct <= 0:
                 return x
             factor = 1.0 + rng.uniform(-noise_pct, noise_pct) / 100.0
-            return max(0.0, x * factor)
-        baseline = jitter(baseline)
-        proposed = jitter(proposed)
+            return x * factor
+        baseline = _clamp(jitter(baseline), lo, hi)
+        proposed = _clamp(jitter(proposed), lo, hi)
         rows.append({
             "Category": m["category"],
             "Metric": m["metric"],
             "Unit": m["unit"],
             "Direction": m["direction"],
+            "Driver": m.get("driver", "ALL"),
+            "Min": lo,
+            "Max": hi,
             "Baseline": round(baseline, 1),
             "Proposed": round(proposed, 1),
             "Source": "Illustrative (example only)",
@@ -954,8 +958,9 @@ if res:
             "Auto-calculate proposed from baseline using expected 5S maturity",
             value=True,
         )
+        display_df = st.session_state["eval_df"].drop(columns=["Driver", "Min", "Max"], errors="ignore")
         edited = st.data_editor(
-            st.session_state["eval_df"],
+            display_df,
             num_rows="fixed",
             use_container_width=True,
             column_config={
@@ -963,11 +968,16 @@ if res:
                 "Proposed": st.column_config.NumberColumn("Proposed"),
                 "Source": st.column_config.SelectboxColumn("Source", options=EVAL_SOURCES),
             },
-            disabled=["Category", "Metric", "Unit", "Direction", "Driver", "Min", "Max"],
+            disabled=["Category", "Metric", "Unit", "Direction"],
         )
+        # Merge edited values back into full dataframe
+        full_df = st.session_state["eval_df"].copy()
+        for col in ["Baseline", "Proposed", "Source"]:
+            if col in edited.columns:
+                full_df[col] = edited[col]
         if auto_prop:
-            edited = compute_proposed_from_baseline(edited, five_s_levels, expected_5s)
-        st.session_state["eval_df"] = edited
+            full_df = compute_proposed_from_baseline(full_df, five_s_levels, expected_5s)
+        st.session_state["eval_df"] = full_df
 
     eval_rows = compute_eval_results(st.session_state["eval_df"])
     st.session_state["eval_results"] = eval_rows
