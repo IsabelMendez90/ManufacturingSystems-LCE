@@ -243,7 +243,7 @@ def find_lce_stage_gaps(plan_text: str, selected_stages: list) -> list:
     text = plan_text or ""
     stage_keys = [s.split(":")[0].strip() for s in selected_stages]
     for stage in stage_keys:
-        if not re.search(rf"\\b{re.escape(stage)}\\b", text, flags=re.IGNORECASE):
+        if not re.search(rf"\b{re.escape(stage)}\b", text, flags=re.IGNORECASE):
             gaps.append(f"LCE stage not mentioned in plan: {stage}")
     return gaps
 
@@ -286,6 +286,46 @@ def parse_section(text, head):
     start = matches[idx].end()
     end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
     return text[start:end].strip()
+
+
+
+def clean_internal_verifier_leaks(plan_text: str) -> str:
+    """Remove accidental leakage of internal verifier/debug feedback from final user-facing output.
+
+    The verifier is allowed to guide refinement, but its comments must not appear as
+    manufacturing recommendations. This is only a safety net; the primary control is
+    the prompt instruction and the private-feedback label used during refinement.
+    """
+    if not plan_text:
+        return ""
+
+    blocked_patterns = [
+        r"verification findings",
+        r"needs fix",
+        r"private verifier feedback",
+        r"do not quote",
+        r"missing or empty section",
+        r"expected 5s line missing",
+        r"lce stage not mentioned",
+        r"fill missing lce stages",
+        r"add concrete 5s references",
+        r"missing cues",
+        r"internal checklist feedback",
+    ]
+
+    cleaned_lines = []
+    for line in plan_text.splitlines():
+        low = line.lower()
+        if any(re.search(pat, low) for pat in blocked_patterns):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned = "\n".join(cleaned_lines).strip()
+
+    # Compact excessive blank lines left by removed debug lines.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned
+
 
 def _cache_key(objective, system_type, industry, role, selected_stages, five_s_levels, docs_text):
     doc_hash = hashlib.sha256((docs_text or "").encode("utf-8")).hexdigest()
@@ -605,7 +645,11 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "IMPORTANT INSTRUCTIONS:\n"
         "- Scope: manufacturing system typology, LCE stages, 5S (Social, Sustainable, Sensing, Smart, Safe), with supply chain & Industry 5.0.\n"
         "- Never invent data; use the evidence only.\n"
-        "- Keep responses concise, precise, and actionable.\n\n"
+        "- Keep responses concise, precise, and actionable.\n"
+        "- Do not mention verification findings, missing cues, missing sections, or internal checklist feedback in the final answer.\n"
+        "- If verifier feedback is provided, use it only to improve the plan silently.\n"
+        "- The final plan must read as a manufacturing recommendation, not as a self-correction or debugging report.\n"
+        "- In [Supply Chain Configuration & Action Plan], explicitly mention each selected LCE stage and provide one actionable bullet per stage.\n\n"
         f"Company objective: {state.objective}\n"
         f"User role: {state.role}\n\n"
         "Selected LCE stages:\n"
@@ -724,7 +768,7 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         gaps = []
         gaps += find_5s_gaps(sc_text, five_s_levels)
         gaps += find_structure_gaps(plan_text)
-        gaps += find_lce_stage_gaps(sc_text, selected_stages)
+        gaps += find_lce_stage_gaps(plan_text, selected_stages)
 
         # Tools (bounded set)
         run_tools = []
@@ -744,7 +788,16 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         critic = []
         if not passed_verify:
             critic.append("VERIFICATION FINDINGS:\n- " + "\n- ".join(gaps[:10]))
-        evidence += "\n\n[NEEDS FIX — ADDRESS IN NEXT PASS]\n" + "\n\n".join(critic)
+        evidence += (
+            "\n\n[PRIVATE VERIFIER FEEDBACK — DO NOT QUOTE OR MENTION IN FINAL OUTPUT]\n"
+            "Use the following feedback only to silently improve the next plan. "
+            "Do not write phrases such as 'add references', 'missing stages', "
+            "'verification findings', 'needs fix', or 'internal checklist' in the final answer.\n"
+            + "\n\n".join(critic)
+        )
+
+    # Final safety pass: remove any accidental verifier/debug leakage before rendering results.
+    plan_text = clean_internal_verifier_leaks(plan_text)
 
     # Stage Views pass
     context_block = build_context_block(
@@ -1013,6 +1066,7 @@ if res:
         )
         if cache_key:
             st.session_state["why_cache"][cache_key] = why_5s
+    st.session_state["why_5s"] = why_5s
 
     rows = []
     for dim in ["Social","Sustainable","Sensing","Smart","Safe"]:
