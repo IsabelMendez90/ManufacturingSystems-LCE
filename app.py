@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v9_rich_technology_transfer_human_approved"
+CACHE_REVISION = "benchmark_clean_v10_complete_stage_views"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -693,6 +693,8 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, or production settings.\n"
         "- AI tools may recommend changes, but any operational update must require human review and approval.\n"
         "- For Technology Transfer, keep the stage views specific: technical-economic benchmarking, equipment/technology selection, pilot-line or joint-development trials, process plans, SOPs, installation qualification, first-article inspection, MES/ERP connection, and digital-twin lifecycle learning where relevant.\n"
+        "- Never leave Function, Organization, Information, Resource, or Performance blank. If the plan is concise, infer these fields from the selected LCE activity and the raw plan line.\n"
+        "- Performance should describe an evaluation criterion, approval point, readiness check, or tollgate, not a vague phrase such as 'confirmed' by itself.\n"
     )
 
 def parse_stage_views_json(llm_response, selected_stages):
@@ -737,6 +739,133 @@ def parse_stage_views_from_plan(plan_text, selected_stages):
             out[name]["Resource"]     = grab("Resource")
             out[name]["Performance"]  = grab("Performance")
         i += 3
+    return out
+
+def _stage_views_are_complete(stage_views: dict, selected_stages: list) -> bool:
+    """Return True only when every selected stage has all five stage-view fields."""
+    if not selected_stages or not isinstance(stage_views, dict):
+        return False
+    required_fields = ["Function", "Organization", "Information", "Resource", "Performance"]
+    for action in selected_stages:
+        stage_key = action.split(":")[0].strip()
+        views = stage_views.get(stage_key, {}) or {}
+        for field in required_fields:
+            if not str(views.get(field, "")).strip():
+                return False
+    return True
+
+
+def _extract_stage_plan_line(plan_text: str, stage_key: str) -> str:
+    """Extract the raw plan sentence corresponding to an LCE stage, when available."""
+    sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan") or plan_text or ""
+    sc_norm = sc.replace("–", "-").replace("—", "-").replace("→", "->")
+    stages = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life", "End‑of‑Life"]
+    for line in sc_norm.splitlines():
+        if re.match(rf"^\s*[-*]?\s*{re.escape(stage_key)}\s*[:\-]", line, flags=re.IGNORECASE):
+            return line.strip()
+    stage_alias = "End[-‑]of[-‑]Life" if stage_key in ["End-of-Life", "End‑of‑Life"] else re.escape(stage_key)
+    next_pattern = "|".join(re.escape(s) for s in stages if s.replace("‑", "-") != stage_key.replace("‑", "-"))
+    m = re.search(rf"({stage_alias})\s*[:\-]\s*(.*?)(?=(?:{next_pattern})\s*[:\-]|$)", sc_norm, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        return (m.group(1) + ": " + m.group(2)).strip(" .\n\t")
+    return ""
+
+
+def _append_plan_specific_evidence(template: dict, stage_line: str) -> dict:
+    """Lightly enrich deterministic stage views with deliverable/tollgate text from the raw plan."""
+    if not stage_line:
+        return dict(template)
+    out = dict(template)
+    deliverable = ""
+    m = re.search(r"(?:deliverable|output)\s*:\s*(.*?)(?:\.\s*Tollgate\s*:|;\s*Tollgate\s*:|\s*Tollgate\s*:|$)", stage_line, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        deliverable = m.group(1).strip(" .")
+    else:
+        m = re.search(r"->\s*(.*?)(?:\.\s*Tollgate\s*:|;\s*Tollgate\s*:|\s*Tollgate\s*:|$)", stage_line, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            deliverable = m.group(1).strip(" .")
+    tollgate = ""
+    m = re.search(r"Tollgate\s*:\s*(.*)$", stage_line, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        tollgate = m.group(1).strip(" .")
+    if deliverable and deliverable.lower() not in out["Information"].lower():
+        out["Information"] = f"{out['Information']} Key output: {deliverable}."
+    if tollgate and tollgate.lower() not in out["Performance"].lower():
+        out["Performance"] = f"{out['Performance']} Tollgate: {tollgate}."
+    return out
+
+
+def build_deterministic_stage_views(system_type: str, selected_stages: list, plan_text: str) -> dict:
+    """Create complete LCE stage views when the LLM JSON is missing or too sparse."""
+    templates = {
+        "Technology Transfer": {
+            "Ideation": {
+                "Function": "Capture geometry, material, batch-size, and technical-performance requirements for the new component or product family.",
+                "Organization": "Product engineering, manufacturing engineering, quality, and supplier specialists coordinate the initial technology-transfer requirements.",
+                "Information": "Technical specification sheet, material data, product geometry, batch-size requirements, and technical-economic benchmarking inputs.",
+                "Resource": "CAD models, material databases, supplier capability data, technical-economic benchmarking tools, and engineering expertise.",
+                "Performance": "Technical specification sheet approved by product and manufacturing engineering for downstream technology-selection decisions.",
+            },
+            "Basic Development": {
+                "Function": "Compare and select manufacturing technology and equipment using technical-economic benchmarking and feasibility evidence.",
+                "Organization": "Manufacturing engineering, procurement, process engineering, quality, and equipment suppliers support the selection decision.",
+                "Information": "Benchmark report, equipment or technology shortlist, supplier data, feasibility assumptions, and pilot-line or joint-development trial plan.",
+                "Resource": "Equipment catalogues, supplier trials, pilot-line resources, AHP/TCO or similar decision tools, and feasibility-analysis templates.",
+                "Performance": "Technology-selection decision supported by benchmark evidence, equipment shortlist, and human-approved feasibility review.",
+            },
+            "Advanced Development": {
+                "Function": "Develop the process plan, SOPs, control documentation, inspection criteria, and data-collection logic for the selected technology.",
+                "Organization": "Process engineering, quality assurance, automation or MES team, maintenance, and operations representatives define the transfer package.",
+                "Information": "Process flow diagram, control plan, SOP draft, inspection criteria, MES/ERP data requirements, and pilot-validation evidence.",
+                "Resource": "SOP templates, quality tools, metrology resources, MES/ERP interface definitions, and predictive-maintenance inputs.",
+                "Performance": "Process plan and control documentation validated for pilot testing with a human-approved SOP baseline.",
+            },
+            "Launching": {
+                "Function": "Install, qualify, test, and ramp up equipment through installation qualification, pilot production, and first-article inspection.",
+                "Organization": "Commissioning team, operations, maintenance, quality, and supplier technical support coordinate installation and ramp-up.",
+                "Information": "Installation qualification report, calibration records, ramp-up checklist, first-article inspection report, deviation log, and approval evidence.",
+                "Resource": "Installation tools, calibration equipment, pilot-line resources, inspection systems, MES/SCADA data, and digital-twin or simulation support.",
+                "Performance": "Equipment readiness confirmed through installation qualification, first-article inspection, and human-approved production ramp-up decision.",
+            },
+            "End-of-Life": {
+                "Function": "Retire or adapt equipment, document performance and failures, and update lifecycle-learning records for future transfers.",
+                "Organization": "Asset management, maintenance, sustainability or logistics, engineering knowledge management, and operations close the transfer lifecycle.",
+                "Information": "End-of-life report, failure-history log, lessons-learned archive, digital-twin lifecycle update, and reuse or recycling plan.",
+                "Resource": "Maintenance records, MES/ERP or historian data, decommissioning tools, recycling or reuse partners, and digital-twin records.",
+                "Performance": "Closure approved after performance history, failure lessons, and reuse or retirement decisions are documented for future technology-transfer learning.",
+            },
+        },
+        "Product Transfer": {
+            "Ideation": {"Function": "Define product BOM, material specifications, quality requirements, and product-transfer constraints.", "Organization": "Product engineering, manufacturing engineering, quality, procurement, and supply-chain teams align transfer requirements.", "Information": "BOM document, material specification sheet, quality requirement matrix, customer requirements, and traceability needs.", "Resource": "BOM tools, material databases, quality templates, stakeholder input, and supplier capability information.", "Performance": "BOM and quality requirements approved as the basis for manufacturing and supplier planning."},
+            "Basic Development": {"Function": "Define manufacturing and quality-control specifications for cost, volume, delivery, and acceptance.", "Organization": "Manufacturing engineering, process planning, quality assurance, and supply-chain planning teams define the transfer package.", "Information": "Control plan, inspection plan, process flow diagram, acceptance criteria, and workforce skill requirements.", "Resource": "APQP/SPC tools, inspection templates, metrology resources, process documentation, and training materials.", "Performance": "Control and inspection plans reviewed for feasibility before supplier qualification and launch preparation."},
+            "Advanced Development": {"Function": "Evaluate and select suppliers using capability, capacity, compliance, quality, cost, and risk criteria.", "Organization": "Procurement, supply chain, product engineering, quality, and technical evaluation teams conduct supplier qualification.", "Information": "Supplier shortlist, qualification reports, audit evidence, scoring matrix, and risk assessment.", "Resource": "AHP/TCO or similar MCDM tools, supplier data, audit checklists, and technical evaluation expertise.", "Performance": "Supplier selection supported by qualification evidence and a documented sourcing decision."},
+            "Launching": {"Function": "Prepare in-house assembly, verify quality controls, train the workforce, and manage ramp-up readiness.", "Organization": "Production team, quality manager, training coordinator, supply-chain team, and manufacturing engineering coordinate launch.", "Information": "Acceptance criteria, ramp-up checklist, training record, traceability log, quality-control evidence, and issue log.", "Resource": "Assembly equipment, training materials, inspection tools, APQP/SPC records, and digital traceability system.", "Performance": "Assembly readiness verified through acceptance criteria, training completion, traceability readiness, and ramp-up approval."},
+            "End-of-Life": {"Function": "Plan disassembly, recycling, reuse, reverse logistics, contract closure, and product-transfer lifecycle documentation.", "Organization": "Sustainability, logistics, procurement, supplier management, and product engineering close the product-transfer lifecycle.", "Information": "Reverse-logistics plan, contract-closure checklist, disassembly instructions, recycling pathways, and lessons learned.", "Resource": "Disassembly tools, recycling contracts, supplier records, documentation system, and lifecycle-data repository.", "Performance": "End-of-life and contract-closure plan approved with reuse, recycling, and reverse-logistics pathways documented."},
+        },
+        "Facility Design": {
+            "Ideation": {"Function": "Specify product, process, demand, and facility requirements that frame the new or transformed manufacturing system.", "Organization": "Manufacturing engineering, operations, product engineering, facilities, safety, and supply-chain stakeholders define requirements.", "Information": "Product requirements, process requirements, demand assumptions, safety constraints, sustainability criteria, and site constraints.", "Resource": "Process data, product documentation, site information, stakeholder workshops, and preliminary capacity assumptions.", "Performance": "Facility requirements approved for manufacturing-system and equipment selection."},
+            "Basic Development": {"Function": "Select manufacturing systems, equipment, utilities, and facility concepts that satisfy process and capacity needs.", "Organization": "Facilities engineering, manufacturing engineering, procurement, operations, safety, and sustainability teams compare alternatives.", "Information": "Equipment list, system alternatives, utility requirements, make-or-buy logic, and preliminary investment assumptions.", "Resource": "Supplier data, equipment catalogues, layout tools, capacity models, and cost or sustainability screening tools.", "Performance": "Facility concept and equipment/system selection reviewed against process, capacity, safety, and sustainability requirements."},
+            "Advanced Development": {"Function": "Design shop-floor layout, capacity, material flow, manufacturing strategy, safety zones, and digital infrastructure.", "Organization": "Industrial engineering, facilities, operations, maintenance, safety, IT/OT, and logistics teams develop the integrated layout.", "Information": "Layout drawings, capacity analysis, material-flow map, safety plan, utility plan, and digital-infrastructure requirements.", "Resource": "Layout simulation, DES or capacity tools, CAD/BIM resources, safety assessment tools, and logistics data.", "Performance": "Layout and capacity design validated through flow, safety, and operational-readiness review."},
+            "Launching": {"Function": "Build, install, commission, ramp up, and evaluate the facility and manufacturing systems.", "Organization": "Construction or facilities team, equipment suppliers, operations, maintenance, quality, safety, and IT/OT coordinate launch.", "Information": "Installation records, commissioning checklist, ramp-up plan, training records, safety sign-off, and performance evidence.", "Resource": "Construction resources, installation tools, commissioning protocols, training materials, MES/SCADA infrastructure, and inspection tools.", "Performance": "Facility readiness confirmed through commissioning, training, safety sign-off, and human-approved ramp-up decision."},
+            "End-of-Life": {"Function": "Audit the facility for reuse, reconfiguration, decommissioning, or transformation.", "Organization": "Facilities, asset management, sustainability, finance, operations, and safety teams evaluate future use or closure.", "Information": "Facility audit, asset inventory, reconfiguration options, decommissioning plan, sustainability assessment, and lessons learned.", "Resource": "Asset records, maintenance data, facility drawings, environmental records, and decommissioning or reconfiguration partners.", "Performance": "Reuse, reconfiguration, or decommissioning decision approved with documented asset and sustainability evidence."},
+        },
+    }
+
+    out = {}
+    stage_templates = templates.get(system_type, {})
+    for action in selected_stages:
+        stage_key = action.split(":")[0].strip()
+        base = stage_templates.get(stage_key)
+        if not base:
+            base = {
+                "Function": action.split(":", 1)[1].strip() if ":" in action else action,
+                "Organization": "Cross-functional manufacturing, quality, supply-chain, and operations team.",
+                "Information": "Stage-specific requirements, decision records, deliverables, and review evidence.",
+                "Resource": "Engineering tools, documentation templates, process data, and stakeholder expertise.",
+                "Performance": "Stage output reviewed through a documented approval or readiness checkpoint.",
+            }
+        stage_line = _extract_stage_plan_line(plan_text, stage_key)
+        out[stage_key] = _append_plan_specific_evidence(base, stage_line)
     return out
 
 # ------------------------ Hybrid Expected 5S rationales ------------------------
@@ -1185,8 +1314,16 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         stage_views = parse_stage_views_json(stage_views_raw, selected_stages)
     except Exception:
         stage_views = {}
-    if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
-        stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
+
+    # If the LLM returns malformed, empty, or partial Stage Views, repair them deterministically.
+    # This preserves a complete Function/Organization/Information/Resource/Performance structure
+    # for every selected LCE stage.
+    if not _stage_views_are_complete(stage_views, selected_stages):
+        parsed_views = parse_stage_views_from_plan(plan_text, selected_stages) if plan_text else {}
+        if _stage_views_are_complete(parsed_views, selected_stages):
+            stage_views = parsed_views
+        else:
+            stage_views = build_deterministic_stage_views(system_type, selected_stages, plan_text)
 
     # Clean unsupported specifics from stage-view fields as a final guard.
     for _stage, _views in (stage_views or {}).items():
