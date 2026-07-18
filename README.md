@@ -11,8 +11,6 @@ This repository contains a Streamlit prototype for a bounded LLM-based decision-
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
-├── .streamlit/
-│   └── secrets.example.toml
 ├── docs/
 │   └── reproducibility_notes.md
 ├── examples/
@@ -22,6 +20,11 @@ This repository contains a Streamlit prototype for a bounded LLM-based decision-
     ├── manufacturing_knowledge_base.csv
     └── manufacturing_knowledge_base.md
 ```
+
+
+## Current package notes
+
+This GitHub package keeps secrets out of the repository. It also includes stricter Facility Design prompting and final-output cleaning to prevent internal verifier wording from appearing in generated recommendations.
 
 ## Knowledge base
 
@@ -47,11 +50,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create `.streamlit/secrets.toml` using the example file:
-
-```toml
-OPENROUTER_API_KEY = "your_openrouter_api_key_here"
-```
+Configure your `OPENROUTER_API_KEY` in Streamlit secrets. For local testing, create your own `.streamlit/secrets.toml` file, but do not commit it to the repository.
 
 Then run:
 

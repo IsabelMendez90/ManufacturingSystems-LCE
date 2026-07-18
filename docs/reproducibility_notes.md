@@ -11,3 +11,12 @@ The knowledge base formalises the domain rules embedded in the prototype: typolo
 ## Human approval rule
 
 The tool generates decision-support recommendations only. Changes to SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records require human review and approval.
+
+
+## Internal verifier wording guard
+
+The Plan--Verify--Refine loop uses internal drafting requirements to improve the next output, but final recommendations are cleaned to avoid exposing verifier/debug language such as “verification feedback”, “feedback gaps”, “missing cues”, or “internal checklist”.
+
+## Secrets
+
+Secrets are intentionally not included in the repository package. Configure `OPENROUTER_API_KEY` through Streamlit secrets or a local, uncommitted `.streamlit/secrets.toml`.

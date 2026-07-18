@@ -62,7 +62,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v11_facility_design_centered__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v12_kb_facility_strict__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -326,6 +326,10 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
         r"add concrete 5s references",
         r"missing cues",
         r"internal checklist feedback",
+        r"verifier feedback",
+        r"internal verifier",
+        r"debugging report",
+        r"self-correction",
     ]
 
     cleaned_lines = []
@@ -336,6 +340,23 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
         cleaned_lines.append(line)
 
     cleaned = "\n".join(cleaned_lines).strip()
+
+    # Neutralise verifier-leak phrases while preserving useful manufacturing recommendations.
+    verifier_leak_replacements = [
+        (r"address verification feedback gaps", "address implementation gaps"),
+        (r"verification feedback gaps", "implementation gaps"),
+        (r"feedback gaps", "implementation gaps"),
+        (r"address verifier feedback", "strengthen implementation consistency"),
+        (r"verifier feedback", "implementation guidance"),
+        (r"verification feedback", "implementation guidance"),
+        (r"internal checklist", "implementation checklist"),
+    ]
+    for pat, repl in verifier_leak_replacements:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
+    # Remove awkward phrases that can appear when the model paraphrases internal dimensions.
+    cleaned = re.sub(r"\bin (Social|Sustainable|Sensing|Smart|Safe) 5S\b", r"in the \1 dimension", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(Social|Sustainable|Sensing|Smart|Safe) 5S\b", r"\1 dimension", cleaned, flags=re.IGNORECASE)
 
     # Remove accidental internal maturity-label phrasing from narrative sections.
     # Maturity levels should appear only in [Expected 5S Maturity].
@@ -723,6 +744,8 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         "- For Facility Design, cyber-by-design, sensing infrastructure, and digital traceability are supporting Information/Resource elements, not the main Advanced Development activity.\n"
         "- For Facility Design Advanced Development, prioritize layout, capacity, material flow, buffer/storage areas, safety zones, utilities, and manufacturing strategy rather than cybersecurity alone.\n"
         "- For Facility Design Launching, prioritize build/install, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.\n"
+        "- For Facility Design End-of-Life, include reuse, transformation, decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned where relevant.\n"
+        "- For Facility Design, do not let supply-chain, cyber-by-design, sensing, or traceability replace the core facility-design content: requirements, capacity, layout, material flow, utilities, commissioning, and reconfiguration.\n"
         "- Never leave Function, Organization, Information, Resource, or Performance blank. If the plan is concise, infer these fields from the selected LCE activity and the raw plan line.\n"
         "- Performance should describe an evaluation criterion, approval point, readiness check, or tollgate, not a vague phrase such as 'confirmed' by itself.\n"
     )
@@ -1185,6 +1208,11 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- For Facility Design Advanced Development, prioritize shop-floor layout, capacity model, material-flow logic, storage/buffer areas, human movement, safety zones, utilities, and manufacturing strategy.\n"
         "- For Facility Design Launching, prioritize build/install, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.\n"
         "- For Facility Design End-of-Life, prioritize reuse, transformation, decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned.\n"
+        "- For Facility Design, do not reduce the output to generic one-line deliverables such as only 'detailed layout drawing' or only 'reuse/decommissioning audit report'. Each stage must include the relevant facility-centred elements from the frozen knowledge base.\n"
+        "- For Facility Design Advanced Development, explicitly mention at least four of the following when relevant: capacity model, material-flow logic, storage/buffer areas, human movement paths, safety zones, utility routing, manufacturing strategy, CAD/BIM layout, DES/layout simulation.\n"
+        "- For Facility Design Launching, explicitly mention commissioning, site acceptance testing, calibration, operator readiness, safety sign-off, and ramp-up evaluation where relevant.\n"
+        "- For Facility Design End-of-Life, explicitly mention reuse, transformation or decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned where relevant.\n"
+        "- Never mention verifier feedback, verification feedback, feedback gaps, missing cues, or internal checklist issues in any final section.\n"
         "- In risk statements, human review and approval should be framed as a governance control, not as a risk.\n\n"
         f"Company objective: {state.objective}\n"
         f"User role: {state.role}\n\n"
@@ -1321,15 +1349,19 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         if not enable_agent or not auto_iterate or passed_verify:
             evidence += "\n\n[OBSERVATIONS]\n" + "\n".join([f"- {o['tool']}: {o['summary']}" for o in observations])
             break
-        critic = []
+        internal_requirements = []
         if not passed_verify:
-            critic.append("VERIFICATION FINDINGS:\n- " + "\n- ".join(gaps[:10]))
+            for item in gaps[:10]:
+                safe_item = re.sub(r"(?i)verification findings|private verifier feedback|verifier feedback|missing cues|internal checklist feedback", "drafting requirement", str(item))
+                safe_item = re.sub(r"(?i)missing or empty section", "include required section", safe_item)
+                safe_item = re.sub(r"(?i)LCE stage not mentioned", "include LCE stage", safe_item)
+                safe_item = re.sub(r"(?i)add concrete 5S references", "include concrete I5S evidence", safe_item)
+                internal_requirements.append(safe_item)
         evidence += (
-            "\n\n[PRIVATE VERIFIER FEEDBACK — DO NOT QUOTE OR MENTION IN FINAL OUTPUT]\n"
-            "Use the following feedback only to silently improve the next plan. "
-            "Do not write phrases such as 'add references', 'missing stages', "
-            "'verification findings', 'needs fix', or 'internal checklist' in the final answer.\n"
-            + "\n\n".join(critic)
+            "\n\n[PRIVATE DRAFTING REQUIREMENTS — DO NOT QUOTE OR MENTION IN FINAL OUTPUT]\n"
+            "Use these requirements only to silently improve the next plan. "
+            "Do not mention internal requirements, feedback, gaps, checks, or self-correction in the final answer.\n"
+            + ("- " + "\n- ".join(internal_requirements) if internal_requirements else "")
         )
 
     # Final safety pass: remove verifier/debug leakage and unsupported specifics before rendering results.
