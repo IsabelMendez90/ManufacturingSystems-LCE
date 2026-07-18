@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v8_human_approved_ai_updates"
+CACHE_REVISION = "benchmark_clean_v9_rich_technology_transfer_human_approved"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -185,7 +185,7 @@ supply_chain_recommendations = {
         "Agile multi-sourcing; supplier MCDM (AHP/TCO); APQP/SPC; decentralized traceability."
     ],
     "Technology Transfer":[
-        "Pilot lines; technical-economic benchmarking; joint dev; predictive + MES/ERP; digital twins."
+        "Technical-economic benchmarking; equipment/technology selection; pilot lines; joint-development trials; installation qualification; first-article inspection; predictive maintenance; MES/ERP data collection; digital twins for simulation and lifecycle learning; human-approved feedback loops."
     ],
     "Facility Design":[
         "Local/resilient networks; make-or-buy; green infra; layout/OEE simulation; cyber-by-design."
@@ -418,6 +418,24 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
+
+    # Avoid implying verified sustainability performance improvement when only a plan is generated.
+    sustainability_target_patterns = [
+        (
+            r"\bset carbon[-\s]?footprint reduction targets\b",
+            "define carbon-accounting indicators and sustainability monitoring criteria",
+        ),
+        (
+            r"\bcarbon[-\s]?footprint reduction targets\b",
+            "carbon-accounting indicators and sustainability monitoring criteria",
+        ),
+        (
+            r"\bguarantee(?:s|d)? carbon reduction\b",
+            "support carbon-accounting review",
+        ),
+    ]
+    for pat, repl in sustainability_target_patterns:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
 
     # Keep AI as decision support, not autonomous actuation or automatic document/process modification.
     autonomous_update_patterns = [
@@ -674,6 +692,7 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         "- Prefer auditable digital traceability over blockchain unless blockchain is explicitly required.\n"
         "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, or production settings.\n"
         "- AI tools may recommend changes, but any operational update must require human review and approval.\n"
+        "- For Technology Transfer, keep the stage views specific: technical-economic benchmarking, equipment/technology selection, pilot-line or joint-development trials, process plans, SOPs, installation qualification, first-article inspection, MES/ERP connection, and digital-twin lifecycle learning where relevant.\n"
     )
 
 def parse_stage_views_json(llm_response, selected_stages):
@@ -996,7 +1015,9 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- In [Supply Chain Configuration & Action Plan], explicitly mention each selected LCE stage and provide one actionable bullet per stage.\n"
         "- For each selected LCE stage, include at least one concrete deliverable or tollgate, such as BOM, supplier shortlist, inspection plan, control plan, acceptance criteria, ramp-up checklist, or reverse-logistics plan.\n"
         "- For Product Transfer, prioritize BOM definition, supplier qualification, APQP/SPC, inspection planning, acceptance criteria, traceability, assembly readiness, and ramp-up control.\n"
-        "- For Technology Transfer, prioritize technical specifications, technology/equipment selection, process plans, SOPs, pilot testing, ramp-up, and lessons learned.\n"
+        "- For Technology Transfer, prioritize technical specifications; technical-economic benchmarking; technology/equipment selection; supplier or equipment shortlist; pilot-line or joint-development trials; feasibility evidence; process plans; SOPs; control documentation; installation qualification; first-article inspection; ramp-up; MES/ERP data collection; digital twin support for simulation and lifecycle learning; and lessons learned.\n"
+        "- For Technology Transfer, do not reduce the output to generic technology selection. The plan should explicitly show the pathway: technical specifications -> benchmarking -> equipment/technology selection -> pilot-line or joint-development trials -> process plan and SOPs -> installation qualification and first-article inspection -> human-approved digital-twin learning.\n"
+        "- For Technology Transfer, any AI or digital-twin recommendation must be reviewed by engineers before changing SOPs, control plans, equipment parameters, MES/ERP records, or operational settings.\n"
         "- For Facility Design, prioritize process requirements, equipment selection, layout/capacity design, installation/ramp-up, safety, sustainability, and future reconfiguration.\n\n"
         f"Company objective: {state.objective}\n"
         f"User role: {state.role}\n\n"
