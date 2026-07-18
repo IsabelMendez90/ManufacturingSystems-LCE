@@ -62,7 +62,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v13_kb_enriched_raw_plan__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v14_facility_raw_plan_safe__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -326,9 +326,10 @@ def _selected_stage_name(action: str) -> str:
 def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str:
     """Build a detailed action-plan section from the frozen curated knowledge base.
 
-    This repair/enrichment layer is only used when the LLM response becomes too
-    generic. It keeps the raw plan aligned with the same frozen knowledge base used
-    for Stage Views and avoids one-line deliverable-only outputs.
+    This repair/enrichment layer keeps the raw action plan aligned with the same
+    frozen knowledge base used for Stage Views. For Facility Design it intentionally
+    keeps facility-centred details in the raw plan so the exported output is not a
+    short deliverable-only list.
     """
     lines = []
     for action in selected_stages or []:
@@ -337,26 +338,29 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
         if not entries:
             continue
         e = entries[0]
-        tools = ", ".join((e.get("representative_tools_methods") or [])[:4])
-        deliverables = ", ".join((e.get("expected_deliverables_tollgates") or [])[:4])
+        deliverables = ", ".join((e.get("expected_deliverables_tollgates") or [])[:5])
+        tools = ", ".join((e.get("representative_tools_methods") or [])[:5])
         analysis = e.get("engineering_analysis_function") or e.get("core_activity") or ""
         information = e.get("engineering_synthesis_information") or ""
         evaluation = e.get("engineering_evaluation_performance") or ""
+
         if system_type == "Facility Design":
+            # Facility Design must not collapse into generic deliverables. Keep capacity,
+            # layout, material-flow, utilities, commissioning and reconfiguration logic visible.
             line = (
-                f"{stage}: {analysis} Use {information.lower()} "
-                f"with representative methods such as {tools}. "
-                f"Deliverable/tollgate: {deliverables}. Evaluation: {evaluation}"
+                f"{stage}: {analysis} Key information/methods: {information}. "
+                f"Representative methods/tools: {tools}. "
+                f"Deliverables/tollgates: {deliverables}. "
+                f"Evaluation: {evaluation}"
             )
         else:
             line = (
-                f"{stage}: {analysis} Deliverable/tollgate: {deliverables}. "
-                f"Representative methods: {tools}. Evaluation: {evaluation}"
+                f"{stage}: {analysis} Deliverables/tollgates: {deliverables}. "
+                f"Representative methods/tools: {tools}. Evaluation: {evaluation}"
             )
         line = re.sub(r"\s+", " ", line).strip()
         lines.append(line)
     return "\n".join(lines)
-
 
 def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
     """Detect when the Facility Design raw plan collapses into generic deliverable-only lines."""
@@ -377,16 +381,18 @@ def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
 
 
 def enrich_raw_plan_from_kb_if_needed(plan_text: str, system_type: str, selected_stages: list) -> str:
-    """Repair overly generic Facility Design raw plan sections using the frozen curated KB."""
+    """Repair the raw action-plan section using the frozen KB when needed.
+
+    Facility Design is always rewritten with a KB-grounded action-plan section so
+    the raw plan remains as detailed as the Stage Views. This avoids short generic
+    lines such as only "detailed layout drawing" or "reuse/decommissioning audit".
+    """
     if system_type != "Facility Design":
-        return plan_text
-    if not _facility_raw_plan_is_too_generic(plan_text):
         return plan_text
     detailed = build_kb_action_plan_section(system_type, selected_stages)
     if not detailed:
         return plan_text
     return replace_section(plan_text, "Supply Chain Configuration & Action Plan", detailed)
-
 
 def clean_internal_verifier_leaks(plan_text: str) -> str:
     """Remove accidental leakage of internal verifier/debug feedback from final user-facing output.
@@ -414,6 +420,10 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
         r"internal verifier",
         r"debugging report",
         r"self-correction",
+        r"feedback gaps",
+        r"address verification",
+        r"current\s+L[0-4]",
+        r"L[0-4]\s+lacks",
     ]
 
     cleaned_lines = []
@@ -478,6 +488,19 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
     ]
     for pat in maturity_transition_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
+
+    # Remove parenthetical maturity explanations from narrative sections, e.g.
+    # "(current L1 lacks...)" or "(current Level 1 uses...)".
+    maturity_explanation_patterns = [
+        r"\s*\(\s*(?:current\s+)?L[0-4][^)]*\)",
+        r"\s*\(\s*(?:current\s+)?Level\s*[0-4][^)]*\)",
+    ]
+    for pat in maturity_explanation_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
+
+    # Remove non-parenthetical maturity explanations if they appear after a semicolon or comma.
+    cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?L[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?Level\s*[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
 
     # Normalize accidental 5S dimension labels. The construct uses "Safe", not "Safety".
     # Keep "safety" as a normal noun inside sentences, but correct label-like uses.
@@ -567,6 +590,28 @@ def clean_unprovided_specifics(plan_text: str) -> str:
     # Remove maturity-transition notation that occasionally leaks into narrative recommendations.
     cleaned = re.sub(r"\s*\(\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to|–|-|—)\s*L(?:evel)?\s*[0-4]\s*\)", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to)\s*L(?:evel)?\s*[0-4]", "", cleaned, flags=re.IGNORECASE)
+
+    # Remove maturity-level explanations from narrative recommendations.
+    cleaned = re.sub(r"\s*\(\s*(?:current\s+)?L[0-4][^)]*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*\(\s*(?:current\s+)?Level\s*[0-4][^)]*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?L[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?Level\s*[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
+
+    # Replace unprovided target-achievement language with design-review language.
+    target_language_replacements = [
+        (r"\bcapacity simulation report meets? throughput and flexibility targets\b",
+         "capacity simulation report is reviewed against defined design assumptions"),
+        (r"\bmeets? throughput and flexibility targets\b",
+         "is reviewed against defined design assumptions"),
+        (r"\bstable production at target rate\b",
+         "production readiness is reviewed against defined ramp-up assumptions"),
+        (r"\basset recovery targets met\b",
+         "asset recovery options are documented and reviewed"),
+        (r"\btargets met\b",
+         "reviewed against defined design assumptions"),
+    ]
+    for pat, repl in target_language_replacements:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
 
     # Clarify that human review is a governance control, not a risk by itself.
     governance_risk_patterns = [

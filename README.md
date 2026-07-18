@@ -63,6 +63,6 @@ streamlit run app.py
 The prototype generates structured recommendations for human review. It does not autonomously modify SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records.
 
 
-## v13 update
+## v14 update
 
-This package keeps the frozen curated manufacturing knowledge base as a separate module and adds a repair layer for Facility Design outputs. If the raw action plan becomes too generic, the app enriches the Supply Chain Configuration & Action Plan section using the same frozen knowledge base. The app also removes maturity-transition notation such as `(L1→L2)` from narrative sections so maturity levels appear only in the Expected 5S table.
+This package keeps the frozen curated manufacturing knowledge base as a separate module and strengthens Facility Design outputs. For Facility Design, the raw Supply Chain Configuration & Action Plan is rebuilt from the frozen knowledge base so it remains as detailed as the Stage Views. The app also removes maturity-level explanations such as `current L1`, `L1 lacks`, and `(L1→L2)` from narrative sections, and replaces unprovided target-achievement language with design-review language.
