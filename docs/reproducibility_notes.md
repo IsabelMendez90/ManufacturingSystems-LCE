@@ -22,6 +22,6 @@ The Plan--Verify--Refine loop uses internal drafting requirements to improve the
 Secrets are intentionally not included in the repository package. Configure `OPENROUTER_API_KEY` through Streamlit secrets or a local, uncommitted `.streamlit/secrets.toml`.
 
 
-## v14 safeguards
+## v15 safeguards
 
-Facility Design raw action-plan sections are rebuilt from the frozen knowledge base to avoid generic deliverable-only lines. Narrative sections are cleaned to remove maturity-level explanations (`current L1`, `L1 lacks`, `L1 uses`, `(L1→L2)`) and unprovided target-achievement phrases (`targets met`, `target rate`, `asset recovery targets met`).
+Facility Design raw action-plan sections are rebuilt from the frozen knowledge base to avoid generic deliverable-only lines. Narrative sections are cleaned to remove maturity-level explanations (`current L1`, `L1 lacks`, `L1 uses`, `(L1→L2)`) unprovided target-achievement phrases (`targets met`, `target rate`, `asset recovery targets met`), double-period punctuation artifacts, and ambiguous immutable-chain traceability phrasing.

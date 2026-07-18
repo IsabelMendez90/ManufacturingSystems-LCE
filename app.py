@@ -62,7 +62,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v14_facility_raw_plan_safe__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v15_text_cleanup__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -323,6 +323,24 @@ def _selected_stage_name(action: str) -> str:
     return action.split(":", 1)[0].strip()
 
 
+def _clean_fragment(value: str) -> str:
+    """Clean a KB text fragment before composing raw-plan sentences."""
+    value = str(value or "").strip()
+    value = re.sub(r"\s+", " ", value)
+    value = value.strip(" .;:\n\t")
+    return value
+
+
+def _join_items(items, max_items=5) -> str:
+    """Join KB list items without trailing punctuation that creates double periods."""
+    cleaned = []
+    for item in (items or [])[:max_items]:
+        item = _clean_fragment(item)
+        if item:
+            cleaned.append(item)
+    return ", ".join(cleaned)
+
+
 def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str:
     """Build a detailed action-plan section from the frozen curated knowledge base.
 
@@ -338,11 +356,11 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
         if not entries:
             continue
         e = entries[0]
-        deliverables = ", ".join((e.get("expected_deliverables_tollgates") or [])[:5])
-        tools = ", ".join((e.get("representative_tools_methods") or [])[:5])
-        analysis = e.get("engineering_analysis_function") or e.get("core_activity") or ""
-        information = e.get("engineering_synthesis_information") or ""
-        evaluation = e.get("engineering_evaluation_performance") or ""
+        deliverables = _join_items(e.get("expected_deliverables_tollgates"), max_items=5)
+        tools = _join_items(e.get("representative_tools_methods"), max_items=5)
+        analysis = _clean_fragment(e.get("engineering_analysis_function") or e.get("core_activity") or "")
+        information = _clean_fragment(e.get("engineering_synthesis_information") or "")
+        evaluation = _clean_fragment(e.get("engineering_evaluation_performance") or "")
 
         if system_type == "Facility Design":
             # Facility Design must not collapse into generic deliverables. Keep capacity,
@@ -549,6 +567,24 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Clarify traceability language when immutable-chain wording appears without explicit user input.
+    traceability_replacements = [
+        (
+            r"\bauditable digital traceability system only if customer mandates immutable chain\b",
+            "auditable digital traceability for component lineage; immutable-chain traceability only if explicitly required by the customer",
+        ),
+        (
+            r"\bauditable digital traceability system only if explicitly required by the customer\b",
+            "auditable digital traceability for component lineage; immutable-chain traceability only if explicitly required by the customer",
+        ),
+        (
+            r"\bimmutable chain\b",
+            "immutable-chain traceability",
+        ),
+    ]
+    for pat, repl in traceability_replacements:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
     # Avoid over-advanced methods unless specifically requested; keep recommendations defensible.
     cleaned = re.sub(
         r"\breinforcement[-\s]?learning(?:[-\s]?based)?\s+APS\b",
@@ -688,6 +724,9 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Normalise punctuation artifacts produced by composing KB fragments.
+    cleaned = re.sub(r"\.\s*\.", ".", cleaned)
+    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
 
