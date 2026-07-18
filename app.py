@@ -20,6 +20,7 @@ import random
 st.set_page_config(page_title="LCE + 5S", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
 st.markdown("Developed by: **Dr. J. Isabel Méndez** & **Dr. Arturo Molina**")
+st.caption(f"App version: {APP_VERSION}")
 
 st.markdown("""
     <style>
@@ -60,6 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
+APP_VERSION = "benchmark_clean_v2_no_verifier_leak_tollgates"
 
 # ------------------------ Evaluation metrics (optional) ------------------------
 EVAL_SOURCES = ["Measured", "Simulated", "Estimated", "Illustrative (example only)"]
@@ -322,6 +324,33 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
 
     cleaned = "\n".join(cleaned_lines).strip()
 
+    # Remove accidental internal maturity-label phrasing from narrative sections.
+    # Maturity levels should appear only in [Expected 5S Maturity].
+    cleaned = re.sub(
+        r"\s+for\s+(Social|Sustainable|Sensing|Smart|Safe)\s+L[0-4]\s+alignment",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+for\s+(Social|Sustainable|Sensing|Smart|Safe)\s+Level\s*[0-4]\s+alignment",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(Social|Sustainable|Sensing|Smart|Safe)\s+L[0-4]\b",
+        r"\1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bL[0-4]\s+(Social|Sustainable|Sensing|Smart|Safe)\b",
+        r"\1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
     # Compact excessive blank lines left by removed debug lines.
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned
@@ -330,6 +359,7 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
 def _cache_key(objective, system_type, industry, role, selected_stages, five_s_levels, docs_text):
     doc_hash = hashlib.sha256((docs_text or "").encode("utf-8")).hexdigest()
     payload = {
+        "app_version": APP_VERSION,
         "objective": objective,
         "system_type": system_type,
         "industry": industry,
@@ -590,6 +620,7 @@ def explain_expected_levels(objective, system_type, industry, selected_stages,
     prompt = (
         "Explain concisely WHY each 5S dimension improves from current to expected, using ONLY evidence in the "
         "plan sections above (specific actions, technologies, standards). No generic phrases.\n"
+        "Do not use internal labels such as L1, L2, Level 1, or Level 2 in the rationale text; refer to concrete actions instead.\n"
         "If expected equals current, return a brief justification for maintaining the level "
         "(e.g., no explicit actions identified to increase that dimension).\n\n"
         "Return JSON ONLY with this exact shape:\n" + shape
@@ -649,7 +680,14 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- Do not mention verification findings, missing cues, missing sections, or internal checklist feedback in the final answer.\n"
         "- If verifier feedback is provided, use it only to improve the plan silently.\n"
         "- The final plan must read as a manufacturing recommendation, not as a self-correction or debugging report.\n"
-        "- In [Supply Chain Configuration & Action Plan], explicitly mention each selected LCE stage and provide one actionable bullet per stage.\n\n"
+        "- Do not mention internal maturity labels such as 'L1 alignment', 'Level 1 alignment', or similar inside the action plan.\n"
+        "- Use maturity levels only in the [Expected 5S Maturity] section.\n"
+        "- Avoid saying that a current maturity level 'lacks' a standard if that standard appears in the maturity taxonomy. Frame risks as implementation gaps instead.\n"
+        "- In [Supply Chain Configuration & Action Plan], explicitly mention each selected LCE stage and provide one actionable bullet per stage.\n"
+        "- For each selected LCE stage, include at least one concrete deliverable or tollgate, such as BOM, supplier shortlist, inspection plan, control plan, acceptance criteria, ramp-up checklist, or reverse-logistics plan.\n"
+        "- For Product Transfer, prioritize BOM definition, supplier qualification, APQP/SPC, inspection planning, acceptance criteria, traceability, assembly readiness, and ramp-up control.\n"
+        "- For Technology Transfer, prioritize technical specifications, technology/equipment selection, process plans, SOPs, pilot testing, ramp-up, and lessons learned.\n"
+        "- For Facility Design, prioritize process requirements, equipment selection, layout/capacity design, installation/ramp-up, safety, sustainability, and future reconfiguration.\n\n"
         f"Company objective: {state.objective}\n"
         f"User role: {state.role}\n\n"
         "Selected LCE stages:\n"
@@ -932,7 +970,7 @@ cols = st.columns(5)
 for i, dim in enumerate(["Social","Sustainable","Sensing","Smart","Safe"]):
     with cols[i]:
         options=[f"Level {idx}: {lvl['desc']}" for idx,lvl in enumerate(five_s_taxonomy[dim])]
-        sel = st.radio(dim, options, index=0, key=f"{dim}_radio")
+        sel = st.radio(dim, options, index=1, key=f"{dim}_radio")
         five_s_levels[dim] = options.index(sel)
         techs = five_s_taxonomy[dim][five_s_levels[dim]].get("tech", [])
         if techs: st.caption("Tech hints: " + "; ".join(techs))
