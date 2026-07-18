@@ -61,7 +61,8 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v4_no_unprovided_targets_standards"
+CACHE_REVISION = "benchmark_clean_v6_hybrid_5s_rationales"
+ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
 EVAL_SOURCES = ["Measured", "Simulated", "Estimated", "Illustrative (example only)"]
@@ -398,6 +399,26 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Avoid over-advanced methods unless specifically requested; keep recommendations defensible.
+    cleaned = re.sub(
+        r"\breinforcement[-\s]?learning(?:[-\s]?based)?\s+APS\b",
+        "optimization-based APS",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\breinforcement[-\s]?learning\b",
+        "optimization-based",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bcollaborative robotics\b",
+        "ergonomic work aids or collaborative-assist devices",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
     # Remove common unsupported performance targets while preserving the metric to be checked.
     replacements = [
         (r"\bachieve\s+\d+(?:\.\d+)?\s*%\+?\s+first[-\s]?pass\s+yield\b",
@@ -663,73 +684,200 @@ def parse_stage_views_from_plan(plan_text, selected_stages):
         i += 3
     return out
 
-# ------------------------ NEW: Explain Expected 5S (rationales) ------------------------
-def explain_expected_levels(objective, system_type, industry, selected_stages,
-                            five_s_levels, expected_5s, plan_text) -> dict:
-    """Ask the LLM to justify each S change with 1–2 concrete reasons from the plan."""
-    sc  = parse_section(plan_text, "Supply Chain Configuration & Action Plan")
-    imp = parse_section(plan_text, "Improvement Opportunities & Risks")
-    nxt = parse_section(plan_text, "Digital/AI Next Steps")
+# ------------------------ Hybrid Expected 5S rationales ------------------------
+def constrain_expected_levels(expected_5s: dict, current_5s: dict) -> dict:
+    """Keep maturity changes conservative for demonstrative DSS outputs.
 
-    stages_txt = ", ".join([s.split(":")[0].strip() for s in selected_stages]) or "None"
-    context = (
-        f"OBJECTIVE: {objective}\n"
-        f"SYSTEM: {system_type} | INDUSTRY: {industry}\n"
-        f"STAGES: {stages_txt}\n"
-        "CURRENT 5S: " + ", ".join([f"{k}={v}" for k,v in five_s_levels.items()]) + "\n"
-        "EXPECTED 5S: " + ", ".join([f"{k}={v}" for k,v in expected_5s.items()]) + "\n\n"
-        "[SUPPLY CHAIN PLAN]\n" + (sc or "—") + "\n\n"
-        "[IMPROVEMENT OPPORTUNITIES]\n" + (imp or "—") + "\n\n"
-        "[DIGITAL/AI NEXT STEPS]\n" + (nxt or "—")
-    )
+    Without measured, simulated, or uploaded implementation evidence, each dimension can
+    increase by at most one level. This avoids overstating maturity improvements.
+    """
+    out = {}
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        cur = int(current_5s.get(dim, 0))
+        exp = int(expected_5s.get(dim, cur))
+        exp = max(cur, min(exp, cur + 1, 4))
+        out[dim] = exp
+    return out
 
-    shape = (
-        "{\n"
-        '  "Social": {"current": <int>, "expected": <int>, "why": ["<10-20 words>", "<10-20 words>"]},\n'
-        '  "Sustainable": {"current": <int>, "expected": <int>, "why": ["...", "..."]},\n'
-        '  "Sensing": {"current": <int>, "expected": <int>, "why": ["...", "..."]},\n'
-        '  "Smart": {"current": <int>, "expected": <int>, "why": ["...", "..."]},\n'
-        '  "Safe": {"current": <int>, "expected": <int>, "why": ["...", "..."]}\n'
-        "}"
-    )
 
-    prompt = (
-        "Explain concisely WHY each 5S dimension improves from current to expected, using ONLY evidence in the "
-        "plan sections above (specific actions, technologies, standards). No generic phrases.\n"
-        "Use the exact 5S dimension labels: Social, Sustainable, Sensing, Smart, and Safe. Do not use Safety as a dimension label.\n"
-        "Do not use internal labels such as L1, L2, Level 1, or Level 2 in the rationale text; refer to concrete actions instead.\n"
-        "Do not invent numerical targets, deadlines, or standards not present in the plan.\n"
-        "If expected equals current, return a brief justification for maintaining the level "
-        "(e.g., no explicit actions identified to increase that dimension).\n\n"
-        "Return JSON ONLY with this exact shape:\n" + shape
-    )
+def _regex_hit(text: str, patterns: list) -> bool:
+    text = text or ""
+    return any(re.search(p, text, flags=re.IGNORECASE) for p in patterns)
 
-    txt = llm(
-        [
-            {"role":"system","content":"You produce terse, evidence-based rationales in JSON only."},
-            {"role":"user","content": context + "\n\n" + prompt}
+
+def _pick_reasons(plan_text: str, dim: str) -> list:
+    """Return 1–2 evidence-based reasons for a dimension using deterministic keyword rules."""
+    text = plan_text or ""
+
+    rules = {
+        "Social": [
+            ([r"ergonom", r"human[-\s]?factors?"],
+             "Ergonomic and human-factors actions support safer, more human-centred work design."),
+            ([r"training", r"LMS", r"workforce", r"operator"],
+             "Workforce training actions support skill development and more consistent shop-floor practice."),
+            ([r"co[-\s]?creation", r"participatory", r"worker feedback", r"collaborative"],
+             "Participatory input supports worker engagement during requirements and launch activities."),
         ],
-        temperature=0.2, seed=42
-    )
+        "Sustainable": [
+            ([r"ISO\s?14001", r"waste", r"energy", r"carbon", r"resource use"],
+             "Environmental tracking actions support resource-use monitoring and sustainability management."),
+            ([r"LCA", r"life[-\s]?cycle", r"material lifecycle", r"lifecycle tracking"],
+             "Lifecycle assessment or tracking actions support environmental decision-making across stages."),
+            ([r"circular", r"recycl", r"reuse", r"reverse[-\s]?logistics", r"material recovery"],
+             "Recycling, reuse, or reverse-logistics actions support circular material recovery."),
+        ],
+        "Sensing": [
+            ([r"SCADA", r"DAQ", r"OPC[-\s]?UA", r"MQTT"],
+             "SCADA/DAQ connectivity supports more reliable real-time process visibility."),
+            ([r"IIoT", r"edge", r"sensor", r"condition monitoring", r"real[-\s]?time"],
+             "Sensor and condition-monitoring actions improve equipment and process observability."),
+            ([r"thermocouple", r"limit switch", r"vision", r"inline inspection"],
+             "Process sensors and inspection devices strengthen monitoring of critical operations."),
+        ],
+        "Smart": [
+            ([r"MES", r"MOM", r"APS", r"scheduling", r"optimization"],
+             "MES/MOM, APS, or optimization actions support smarter planning and scheduling decisions."),
+            ([r"predictive maintenance", r"digital twin", r"simulation"],
+             "Predictive maintenance and simulation actions support proactive production control."),
+            ([r"PLC", r"PID", r"automation", r"closed[-\s]?loop"],
+             "Automation and control actions strengthen operational consistency and decision support."),
+        ],
+        "Safe": [
+            ([r"ISO\s?45001", r"occupational", r"health"],
+             "Occupational health and safety actions support a more formal safe-work system."),
+            ([r"IEC\s?61508", r"IEC\s?62061", r"ISO\s?13849", r"functional safety"],
+             "Functional-safety standards support risk control for equipment and automation."),
+            ([r"FMEA", r"HAZOP", r"LOPA", r"LOTO", r"risk"],
+             "FMEA/HAZOP/LOPA or LOTO actions support hazard identification and mitigation."),
+            ([r"IEC\s?62443", r"NIST", r"cyber", r"OT security"],
+             "Cybersecurity controls support safer cyber-physical manufacturing operations."),
+        ],
+    }
 
-    try:
-        data = json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group(0))
-    except Exception:
-        data = {}
-    # Fallbacks for missing or empty rationales
+    reasons = []
+    for patterns, reason in rules.get(dim, []):
+        if _regex_hit(text, patterns) and reason not in reasons:
+            reasons.append(reason)
+        if len(reasons) >= 2:
+            break
+    return reasons
+
+
+def _deterministic_5s_rationales(five_s_levels: dict, expected_5s: dict, plan_text: str) -> dict:
+    """Build a robust baseline rationale set from rule-based evidence extraction."""
+    expected_5s = constrain_expected_levels(expected_5s, five_s_levels)
     out = {}
     for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
         cur = int(five_s_levels.get(dim, 0))
         exp = int(expected_5s.get(dim, cur))
-        entry = (data.get(dim, {}) or {})
-        reasons = entry.get("why", []) or []
+        reasons = _pick_reasons(plan_text, dim)
         if not reasons:
-            if exp == cur:
-                reasons = [f"No explicit actions found to increase {dim}; maintain current level."]
+            if exp > cur:
+                reasons = [
+                    f"The plan indicates improvement potential for {dim}; verify supporting evidence before implementation."
+                ]
             else:
-                reasons = [f"Rationale not returned; please regenerate or refine plan evidence for {dim}."]
+                reasons = [
+                    f"No explicit actions were identified to increase {dim}; maintain the current maturity level."
+                ]
         out[dim] = {"current": cur, "expected": exp, "why": reasons[:2]}
     return out
+
+
+def _clean_why_text(reason: str) -> str:
+    """Sanitize rationale text so the table remains reviewer-proof."""
+    reason = re.sub(r"[*_`]", "", str(reason or ""))
+    reason = re.sub(r"\bL[0-4]\b|\bLevel\s*[0-4]\b", "", reason, flags=re.IGNORECASE)
+    reason = re.sub(r"\bSafety\s*:", "Safe:", reason, flags=re.IGNORECASE)
+    reason = clean_unprovided_specifics(reason)
+    reason = re.sub(r"\s+", " ", reason).strip()
+    return reason
+
+
+def _validate_5s_rationale_payload(data: dict, fallback: dict) -> dict | None:
+    """Validate the optional LLM-polished rationale JSON.
+
+    The app never exposes parse failures. If the LLM output is incomplete, malformed,
+    or uses unsupported labels, the deterministic fallback is used instead.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    cleaned = {}
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        item = data.get(dim)
+        if not isinstance(item, dict):
+            return None
+        reasons = item.get("why", [])
+        if isinstance(reasons, str):
+            reasons = [reasons]
+        if not isinstance(reasons, list):
+            return None
+        reasons = [_clean_why_text(r) for r in reasons if _clean_why_text(r)]
+        if not reasons:
+            return None
+        cur = int(fallback[dim]["current"])
+        exp = int(fallback[dim]["expected"])
+        cleaned[dim] = {"current": cur, "expected": exp, "why": reasons[:2]}
+    return cleaned
+
+
+def _polish_5s_rationales_with_llm(base_rationales: dict, plan_text: str) -> dict | None:
+    """Use the LLM only as a wording polisher for already-grounded rationales.
+
+    The LLM receives rule-based evidence and may make the wording more natural. It must
+    not invent evidence, standards, targets, percentages, or new maturity levels.
+    """
+    if not ENABLE_LLM_RATIONALE_POLISH:
+        return None
+
+    compact_plan = "\n".join([
+        parse_section(plan_text, "Supply Chain Configuration & Action Plan")[:1800],
+        parse_section(plan_text, "Improvement Opportunities & Risks")[:1200],
+        parse_section(plan_text, "Digital/AI Next Steps")[:1000],
+    ])
+
+    prompt = (
+        "Polish the wording of the 5S rationale table using ONLY the provided rule-based rationales "
+        "and the plan excerpts as evidence. Do not add new claims. Do not add numbers, percentages, "
+        "deadlines, or standards that are not already present. Keep the exact dimensions: Social, "
+        "Sustainable, Sensing, Smart, Safe. Use Safe, not Safety, as the dimension label. Keep current "
+        "and expected integers unchanged. Return JSON only with the same structure.\n\n"
+        "PLAN EXCERPTS:\n"
+        f"{compact_plan}\n\n"
+        "RULE_BASED_RATIONALES_JSON:\n"
+        f"{json.dumps(base_rationales, ensure_ascii=False, indent=2)}"
+    )
+
+    try:
+        txt = llm(
+            [
+                {"role": "system", "content": "You polish evidence-grounded manufacturing rationales. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            seed=42,
+        )
+        match = re.search(r"\{.*\}", txt or "", flags=re.DOTALL)
+        if not match:
+            return None
+        data = json.loads(match.group(0))
+        return _validate_5s_rationale_payload(data, base_rationales)
+    except Exception:
+        return None
+
+
+def explain_expected_levels(objective, system_type, industry, selected_stages,
+                            five_s_levels, expected_5s, plan_text) -> dict:
+    """Generate hybrid 5S rationales: deterministic evidence extraction + optional LLM polish.
+
+    The deterministic layer guarantees a complete evidence-grounded rationale table. The
+    LLM is used only to polish wording; if it fails or returns malformed JSON, the app
+    automatically falls back to the deterministic rationales.
+    """
+    base = _deterministic_5s_rationales(five_s_levels, expected_5s, plan_text)
+    polished = _polish_5s_rationales_with_llm(base, plan_text)
+    return polished or base
 
 # ------------------------ Agent state ------------------------
 class AgentState:
@@ -1179,7 +1327,7 @@ if res:
     # ===== Expected 5S with rationales =====
     st.markdown("**Expected 5S Maturity (with rationale)**")
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
-    expected_5s = extract_expected_levels(exp_raw, five_s_levels)
+    expected_5s = constrain_expected_levels(extract_expected_levels(exp_raw, five_s_levels), five_s_levels)
 
     cache_key = st.session_state.get("current_cache_key")
     if "why_cache" not in st.session_state:
@@ -1441,7 +1589,7 @@ res = st.session_state.get("agent_result")
 if res:
     plan_text = res.get("plan_text","")
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
-    expected_5s = extract_expected_levels(exp_raw, five_s_levels)
+    expected_5s = constrain_expected_levels(extract_expected_levels(exp_raw, five_s_levels), five_s_levels)
     why_5s = st.session_state.get("why_5s", {})
     eval_rows = st.session_state.get("eval_results", [])
     pdf_buf = generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s, eval_rows=eval_rows)
