@@ -20,7 +20,7 @@ import random
 st.set_page_config(page_title="LCE + 5S", layout="wide")
 st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
 st.markdown("Developed by: **Dr. J. Isabel Méndez** & **Dr. Arturo Molina**")
-st.caption(f"App version: {APP_VERSION}")
+
 
 st.markdown("""
     <style>
