@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v16_multiline_raw_plan__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v17_clean_raw_section_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -376,9 +376,10 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
             # Facility Design must not collapse into generic deliverables. Keep capacity,
             # layout, material-flow, utilities, commissioning and reconfiguration logic visible.
             # The raw section is intentionally multi-line so Streamlit output and copied text
-            # remain readable stage by stage.
+            # remain readable stage by stage. Each stage header is kept on its own line.
             line = (
-                f"{stage}: {analysis}.\n"
+                f"{stage}:\n"
+                f"  Action: {analysis}.\n"
                 f"  Key information/methods: {information}.\n"
                 f"  Representative methods/tools: {tools}.\n"
                 f"  Deliverables/tollgates: {deliverables}.\n"
@@ -386,7 +387,8 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
             )
         else:
             line = (
-                f"{stage}: {analysis}.\n"
+                f"{stage}:\n"
+                f"  Action: {analysis}.\n"
                 f"  Deliverables/tollgates: {deliverables}.\n"
                 f"  Representative methods/tools: {tools}.\n"
                 f"  Evaluation: {evaluation}."
@@ -428,6 +430,90 @@ def enrich_raw_plan_from_kb_if_needed(plan_text: str, system_type: str, selected
     if not detailed:
         return plan_text
     return replace_section(plan_text, "Supply Chain Configuration & Action Plan", detailed)
+
+def _strip_markdown_labeling(line: str) -> str:
+    """Remove markdown bullets/bold from raw sections while preserving the content."""
+    line = str(line or "").strip()
+    line = re.sub(r"^\s*[-*]\s+", "", line)
+    line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+    line = re.sub(r"\s{2,}$", "", line)
+    return line.strip()
+
+
+def normalize_i5s_order(section_text: str) -> str:
+    """Keep I5S narrative sections in the canonical order and remove markdown clutter."""
+    if not section_text:
+        return ""
+    order = ["Social", "Sustainable", "Sensing", "Smart", "Safe"]
+    buckets = {dim: [] for dim in order}
+    extras = []
+    for raw in section_text.splitlines():
+        line = _strip_markdown_labeling(raw)
+        if not line:
+            continue
+        line = re.sub(r"\bto raise human[-\s]?factors maturity\b", "to strengthen human-factors integration", line, flags=re.IGNORECASE)
+        line = re.sub(r"\bgoverned by human approval of sustainability criteria\b", "subject to human review of sustainability criteria", line, flags=re.IGNORECASE)
+        m = re.match(r"^(Social|Sustainable|Sensing|Smart|Safe)\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if m:
+            dim = next(d for d in order if d.lower() == m.group(1).lower())
+            body = m.group(2).strip()
+            if body:
+                buckets[dim].append(body)
+        else:
+            extras.append(line)
+    out = []
+    for dim in order:
+        if buckets[dim]:
+            body = " ".join(buckets[dim])
+            body = re.sub(r"\s+", " ", body).strip()
+            out.append(f"{dim}: {body}")
+    out.extend(extras)
+    return "\n".join(out).strip()
+
+
+def normalize_supply_chain_raw_format(section_text: str, selected_stages: list) -> str:
+    """Ensure each LCE stage in the raw action plan starts as a separate block."""
+    if not section_text:
+        return ""
+    text = section_text.strip()
+    stages = [_selected_stage_name(s) for s in (selected_stages or [])]
+    if not stages:
+        stages = ["Ideation", "Basic Development", "Advanced Development", "Launching", "End-of-Life"]
+    text = "\n".join(_strip_markdown_labeling(ln) for ln in text.splitlines())
+    for stage in sorted(stages, key=len, reverse=True):
+        is_eol = stage.replace("‑", "-") == "End-of-Life"
+        alias = r"End[-‑]of[-‑]Life" if is_eol else re.escape(stage)
+        stage_label = "End-of-Life" if is_eol else stage
+        text = re.sub(rf"(?<!^)\s+(?={alias}\s*:)", "\n\n", text, flags=re.IGNORECASE)
+        text = re.sub(rf"(?im)^({alias})\s*:\s*(?=\S)", stage_label + ":\n  ", text)
+    for label in ["Action", "Key information/methods", "Representative methods/tools", "Deliverables/tollgates", "Evaluation"]:
+        text = re.sub(rf"\s+(?={re.escape(label)}\s*:)", "\n  ", text)
+    text = re.sub(r"\.\.", ".", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    for stage in sorted(stages, key=len, reverse=True):
+        stage_label = "End-of-Life" if stage.replace("‑", "-") == "End-of-Life" else stage
+        text = re.sub(rf"\n+({re.escape(stage_label)}\s*:)", r"\n\n\1", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def normalize_raw_sections_for_display(plan_text: str, system_type: str, selected_stages: list) -> str:
+    """Final formatting pass for the visible/exported raw sections."""
+    if not plan_text:
+        return ""
+    sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan")
+    if sc:
+        plan_text = replace_section(
+            plan_text,
+            "Supply Chain Configuration & Action Plan",
+            normalize_supply_chain_raw_format(sc, selected_stages),
+        )
+    for head in ["Improvement Opportunities & Risks", "Digital/AI Next Steps"]:
+        body = parse_section(plan_text, head)
+        if body:
+            plan_text = replace_section(plan_text, head, normalize_i5s_order(body))
+    return plan_text
+
 
 def clean_internal_verifier_leaks(plan_text: str) -> str:
     """Remove accidental leakage of internal verifier/debug feedback from final user-facing output.
@@ -1569,6 +1655,8 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
     plan_text = clean_internal_verifier_leaks(plan_text)
     plan_text = clean_unprovided_specifics(plan_text)
     plan_text = enrich_raw_plan_from_kb_if_needed(plan_text, system_type, selected_stages)
+    plan_text = clean_internal_verifier_leaks(clean_unprovided_specifics(plan_text))
+    plan_text = normalize_raw_sections_for_display(plan_text, system_type, selected_stages)
     plan_text = clean_internal_verifier_leaks(clean_unprovided_specifics(plan_text))
 
     # Stage Views pass

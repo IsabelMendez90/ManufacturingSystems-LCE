@@ -71,3 +71,11 @@ This package keeps the frozen curated manufacturing knowledge base as a separate
 ## v16 formatting update
 
 The raw Supply Chain Configuration & Action Plan is rendered with preserved line breaks so each LCE stage remains visually separated in Streamlit outputs and exported/copied text.
+
+
+## v17 formatting update
+
+- Raw action-plan sections now keep each LCE stage as a separate block.
+- Facility Design raw plans use a stage header followed by indented `Action`, `Key information/methods`, `Representative methods/tools`, `Deliverables/tollgates`, and `Evaluation` lines.
+- I5S narrative sections are normalised to the canonical order: Social, Sustainable, Sensing, Smart, Safe.
+- Markdown bullets/bold are removed from raw narrative sections to make copied benchmark outputs cleaner as `.txt` files.
