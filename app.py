@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v6_hybrid_5s_rationales"
+CACHE_REVISION = "benchmark_clean_v7_evidence_based_expected_5s"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -763,9 +763,43 @@ def _pick_reasons(plan_text: str, dim: str) -> list:
     return reasons
 
 
+def infer_expected_levels_from_plan(extracted_expected_5s: dict, current_5s: dict, plan_text: str) -> dict:
+    """Infer conservative expected 5S levels from both LLM output and plan evidence.
+
+    Why this is needed:
+    - The LLM sometimes returns expected levels equal to the current levels even when
+      the generated plan contains explicit improvement actions.
+    - The radar chart and the rationale table should reflect evidence found in the plan,
+      but remain conservative for a demonstrative decision-support artifact.
+
+    Rule:
+    - Start from the LLM's [Expected 5S Maturity] values.
+    - Constrain every dimension to at most +1 level without measured/simulated/uploaded evidence.
+    - If the LLM did not increase a dimension, but the plan contains explicit evidence
+      detected by the 5S rules, increase it by +1.
+    - If there is no evidence for a dimension, keep the current level.
+    """
+    out = constrain_expected_levels(extracted_expected_5s or {}, current_5s)
+
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        cur = int(current_5s.get(dim, 0))
+        exp = int(out.get(dim, cur))
+        evidence_found = len(_pick_reasons(plan_text, dim)) > 0
+
+        if evidence_found and exp <= cur:
+            exp = min(cur + 1, 4)
+
+        # Final conservative guard.
+        exp = max(cur, min(exp, cur + 1, 4))
+        out[dim] = exp
+
+    return out
+
+
+
 def _deterministic_5s_rationales(five_s_levels: dict, expected_5s: dict, plan_text: str) -> dict:
     """Build a robust baseline rationale set from rule-based evidence extraction."""
-    expected_5s = constrain_expected_levels(expected_5s, five_s_levels)
+    expected_5s = infer_expected_levels_from_plan(expected_5s, five_s_levels, plan_text)
     out = {}
     for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
         cur = int(five_s_levels.get(dim, 0))
@@ -916,6 +950,8 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- The final plan must read as a manufacturing recommendation, not as a self-correction or debugging report.\n"
         "- Do not mention internal maturity labels such as 'L1 alignment', 'Level 1 alignment', or similar inside the action plan.\n"
         "- Use maturity levels only in the [Expected 5S Maturity] section.\n"
+        "- In [Expected 5S Maturity], if a dimension has at least one concrete improvement action in the plan, set its expected level to current level + 1, with a maximum one-level increase unless measured, simulated, or uploaded evidence is provided.\n"
+        "- If a dimension has no concrete improvement action, keep its expected level equal to the current level.\n"
         "- Avoid saying that a current maturity level 'lacks' a standard if that standard appears in the maturity taxonomy. Frame risks as implementation gaps instead.\n"
         "- In [Supply Chain Configuration & Action Plan], explicitly mention each selected LCE stage and provide one actionable bullet per stage.\n"
         "- For each selected LCE stage, include at least one concrete deliverable or tollgate, such as BOM, supplier shortlist, inspection plan, control plan, acceptance criteria, ramp-up checklist, or reverse-logistics plan.\n"
@@ -1327,7 +1363,7 @@ if res:
     # ===== Expected 5S with rationales =====
     st.markdown("**Expected 5S Maturity (with rationale)**")
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
-    expected_5s = constrain_expected_levels(extract_expected_levels(exp_raw, five_s_levels), five_s_levels)
+    expected_5s = infer_expected_levels_from_plan(extract_expected_levels(exp_raw, five_s_levels), five_s_levels, plan_text)
 
     cache_key = st.session_state.get("current_cache_key")
     if "why_cache" not in st.session_state:
@@ -1589,7 +1625,7 @@ res = st.session_state.get("agent_result")
 if res:
     plan_text = res.get("plan_text","")
     exp_raw = parse_section(plan_text, "Expected 5S Maturity")
-    expected_5s = constrain_expected_levels(extract_expected_levels(exp_raw, five_s_levels), five_s_levels)
+    expected_5s = infer_expected_levels_from_plan(extract_expected_levels(exp_raw, five_s_levels), five_s_levels, plan_text)
     why_5s = st.session_state.get("why_5s", {})
     eval_rows = st.session_state.get("eval_results", [])
     pdf_buf = generate_pdf_report(plan_text, five_s_levels, expected_5s, why_5s, eval_rows=eval_rows)
