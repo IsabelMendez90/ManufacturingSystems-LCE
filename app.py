@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-APP_VERSION = "benchmark_clean_v2_no_verifier_leak_tollgates"
+CACHE_REVISION = "benchmark_clean_v3_safe_label"
 
 # ------------------------ Evaluation metrics (optional) ------------------------
 EVAL_SOURCES = ["Measured", "Simulated", "Estimated", "Illustrative (example only)"]
@@ -351,6 +351,12 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Normalize accidental 5S dimension labels. The construct uses "Safe", not "Safety".
+    # Keep "safety" as a normal noun inside sentences, but correct label-like uses.
+    cleaned = re.sub(r"(?im)^(\s*[-*]?\s*)Safety\s*:", r"\1Safe:", cleaned)
+    cleaned = re.sub(r"(?im)^(\s*)\*\*Safety\*\*\s*:", r"\1Safe:", cleaned)
+    cleaned = re.sub(r"(?im)^(\s*)\[Safety\]\s*$", r"\1[Safe]", cleaned)
+
     # Compact excessive blank lines left by removed debug lines.
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned
@@ -359,7 +365,7 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
 def _cache_key(objective, system_type, industry, role, selected_stages, five_s_levels, docs_text):
     doc_hash = hashlib.sha256((docs_text or "").encode("utf-8")).hexdigest()
     payload = {
-        "app_version": APP_VERSION,
+        "cache_revision": CACHE_REVISION,
         "objective": objective,
         "system_type": system_type,
         "industry": industry,
@@ -620,6 +626,7 @@ def explain_expected_levels(objective, system_type, industry, selected_stages,
     prompt = (
         "Explain concisely WHY each 5S dimension improves from current to expected, using ONLY evidence in the "
         "plan sections above (specific actions, technologies, standards). No generic phrases.\n"
+        "Use the exact 5S dimension labels: Social, Sustainable, Sensing, Smart, and Safe. Do not use Safety as a dimension label.\n"
         "Do not use internal labels such as L1, L2, Level 1, or Level 2 in the rationale text; refer to concrete actions instead.\n"
         "If expected equals current, return a brief justification for maintaining the level "
         "(e.g., no explicit actions identified to increase that dimension).\n\n"
@@ -675,6 +682,9 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         f"You are an expert in {state.system_type} manufacturing systems for the {state.industry} industry.\n\n"
         "IMPORTANT INSTRUCTIONS:\n"
         "- Scope: manufacturing system typology, LCE stages, 5S (Social, Sustainable, Sensing, Smart, Safe), with supply chain & Industry 5.0.\n"
+        "- Use the exact Industry 5.0 5S labels: Social, Sustainable, Sensing, Smart, and Safe.\n"
+        "- Do not use Safety as a 5S dimension label; use Safe. You may use safety as a normal noun only inside sentences.\n"
+        "- In [Improvement Opportunities & Risks], organize I5S items using Safe, not Safety.\n"
         "- Never invent data; use the evidence only.\n"
         "- Keep responses concise, precise, and actionable.\n"
         "- Do not mention verification findings, missing cues, missing sections, or internal checklist feedback in the final answer.\n"
