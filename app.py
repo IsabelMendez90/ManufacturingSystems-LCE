@@ -11,7 +11,7 @@ from openai import OpenAI
 from fpdf import FPDF
 from io import BytesIO
 from datetime import datetime
-import json, re
+import json, re, html
 import hashlib
 import math
 import random
@@ -55,6 +55,16 @@ st.markdown("""
     div.stDownloadButton > button:hover {
         background-color: #009874 !important;
     }
+
+    .raw-section-box {
+        white-space: pre-wrap;
+        background: rgba(0, 120, 93, 0.08);
+        border-left: 5px solid #00785D;
+        border-radius: 10px;
+        padding: 14px 16px;
+        line-height: 1.45;
+        margin-bottom: 16px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -62,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v15_text_cleanup__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v16_multiline_raw_plan__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -365,20 +375,27 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
         if system_type == "Facility Design":
             # Facility Design must not collapse into generic deliverables. Keep capacity,
             # layout, material-flow, utilities, commissioning and reconfiguration logic visible.
+            # The raw section is intentionally multi-line so Streamlit output and copied text
+            # remain readable stage by stage.
             line = (
-                f"{stage}: {analysis} Key information/methods: {information}. "
-                f"Representative methods/tools: {tools}. "
-                f"Deliverables/tollgates: {deliverables}. "
-                f"Evaluation: {evaluation}"
+                f"{stage}: {analysis}.\n"
+                f"  Key information/methods: {information}.\n"
+                f"  Representative methods/tools: {tools}.\n"
+                f"  Deliverables/tollgates: {deliverables}.\n"
+                f"  Evaluation: {evaluation}."
             )
         else:
             line = (
-                f"{stage}: {analysis} Deliverables/tollgates: {deliverables}. "
-                f"Representative methods/tools: {tools}. Evaluation: {evaluation}"
+                f"{stage}: {analysis}.\n"
+                f"  Deliverables/tollgates: {deliverables}.\n"
+                f"  Representative methods/tools: {tools}.\n"
+                f"  Evaluation: {evaluation}."
             )
-        line = re.sub(r"\s+", " ", line).strip()
+        # Clean spaces within each line without collapsing line breaks.
+        line = "\n".join(re.sub(r"[ \t]+", " ", ln).strip() for ln in line.splitlines())
+        line = re.sub(r"\.\.", ".", line).strip()
         lines.append(line)
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
     """Detect when the Facility Design raw plan collapses into generic deliverable-only lines."""
@@ -1592,6 +1609,14 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         "stage_views": stage_views,
     }
 
+
+
+def render_raw_section_box(text: str):
+    """Render generated raw sections with preserved line breaks instead of one long paragraph."""
+    value = (text or "—").strip() or "—"
+    escaped = html.escape(value)
+    st.markdown(f"<div class='raw-section-box'>{escaped}</div>", unsafe_allow_html=True)
+
 # ------------------------ UI ------------------------
 
 # 1) Objective / Industry / Role
@@ -1808,11 +1833,11 @@ if res:
     # 6b) Show the LLM sections verbatim
     st.subheader("Plan (raw sections)")
     st.markdown("**Supply Chain Configuration & Action Plan**")
-    st.info(parse_section(plan_text,"Supply Chain Configuration & Action Plan") or "—")
+    render_raw_section_box(parse_section(plan_text,"Supply Chain Configuration & Action Plan") or "—")
     st.markdown("**Improvement Opportunities & Risks**")
-    st.info(parse_section(plan_text,"Improvement Opportunities & Risks") or "—")
+    render_raw_section_box(parse_section(plan_text,"Improvement Opportunities & Risks") or "—")
     st.markdown("**Digital/AI Next Steps**")
-    st.info(parse_section(plan_text,"Digital/AI Next Steps") or "—")
+    render_raw_section_box(parse_section(plan_text,"Digital/AI Next Steps") or "—")
 
     # ===== Expected 5S with rationales =====
     st.markdown("**Expected 5S Maturity (with rationale)**")
