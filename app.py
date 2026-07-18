@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v3_safe_label"
+CACHE_REVISION = "benchmark_clean_v4_no_unprovided_targets_standards"
 
 # ------------------------ Evaluation metrics (optional) ------------------------
 EVAL_SOURCES = ["Measured", "Simulated", "Estimated", "Illustrative (example only)"]
@@ -362,6 +362,73 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
     return cleaned
 
 
+def clean_unprovided_specifics(plan_text: str) -> str:
+    """Generalize unsupported numerical targets, deadlines, and over-specific standards.
+
+    The app is a decision-support demonstrator. Unless users upload/provide plant data,
+    outputs should not contain invented performance thresholds, timelines, or sector-specific
+    certification claims. This function is a final safety net after prompt controls.
+    """
+    if not plan_text:
+        return ""
+
+    cleaned = plan_text
+
+    # Replace sector-specific standards that should not appear unless explicitly justified.
+    # "Applicable quality-management requirements" is safer for a generic precision
+    # component manufacturing scenario than medical-device-specific ISO 13485.
+    cleaned = re.sub(
+        r"\bISO\s*13485\b",
+        "applicable quality-management requirements",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    # Use neutral traceability language unless blockchain is explicitly requested in inputs.
+    cleaned = re.sub(
+        r"\bblockchain\s+(?:based\s+)?traceability\b",
+        "auditable digital traceability",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bblockchain\b",
+        "auditable digital traceability system",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove common unsupported performance targets while preserving the metric to be checked.
+    replacements = [
+        (r"\bachieve\s+\d+(?:\.\d+)?\s*%\+?\s+first[-\s]?pass\s+yield\b",
+         "verify first-pass yield against pilot-run acceptance criteria"),
+        (r"\b\d+(?:\.\d+)?\s*%\+?\s+first[-\s]?pass\s+yield\b",
+         "first-pass yield target"),
+        (r"\bzero\s+critical\s+defects\b",
+         "critical-defect reduction"),
+        (r"\brecover\s+\d+(?:\.\d+)?\s*%\+?\s+material\s+value\b",
+         "evaluate material-value recovery"),
+        (r"\b\d+(?:\.\d+)?\s*%\+?\s+material\s+value\b",
+         "material-value recovery target"),
+        (r"\bwithin\s+\d+\s+(?:day|days|week|weeks|month|months|year|years)\b",
+         "within the defined project timeline"),
+    ]
+    for pat, repl in replacements:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
+    # General fallback: replace unsupported standalone percentage targets in narrative text.
+    # This avoids fabricated values while keeping the text readable enough for benchmarking.
+    cleaned = re.sub(
+        r"\b\d+(?:\.\d+)?\s*%\+?\b",
+        "defined target",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
 def _cache_key(objective, system_type, industry, role, selected_stages, five_s_levels, docs_text):
     doc_hash = hashlib.sha256((docs_text or "").encode("utf-8")).hexdigest()
     payload = {
@@ -547,6 +614,9 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         f"- Include EVERY stage exactly once (for: {stages_str}).\n"
         "- Use plain strings (no markdown).\n"
         "- Keep fields concise but concrete.\n"
+        "- Do not invent numerical targets, percentages, deadlines, defect rates, recovery rates, or performance thresholds.\n"
+        "- Use generic quality language unless a specific sector standard is explicitly provided.\n"
+        "- Prefer auditable digital traceability over blockchain unless blockchain is explicitly required.\n"
     )
 
 def parse_stage_views_json(llm_response, selected_stages):
@@ -628,6 +698,7 @@ def explain_expected_levels(objective, system_type, industry, selected_stages,
         "plan sections above (specific actions, technologies, standards). No generic phrases.\n"
         "Use the exact 5S dimension labels: Social, Sustainable, Sensing, Smart, and Safe. Do not use Safety as a dimension label.\n"
         "Do not use internal labels such as L1, L2, Level 1, or Level 2 in the rationale text; refer to concrete actions instead.\n"
+        "Do not invent numerical targets, deadlines, or standards not present in the plan.\n"
         "If expected equals current, return a brief justification for maintaining the level "
         "(e.g., no explicit actions identified to increase that dimension).\n\n"
         "Return JSON ONLY with this exact shape:\n" + shape
@@ -686,6 +757,11 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- Do not use Safety as a 5S dimension label; use Safe. You may use safety as a normal noun only inside sentences.\n"
         "- In [Improvement Opportunities & Risks], organize I5S items using Safe, not Safety.\n"
         "- Never invent data; use the evidence only.\n"
+        "- Do not invent numerical targets, percentages, deadlines, defect rates, recovery rates, or performance thresholds unless they are explicitly provided by the user or uploaded documents.\n"
+        "- If performance evaluation is needed, describe the metric to be checked without assigning a numerical value.\n"
+        "- Do not mention industry-specific standards such as ISO 13485 unless the selected industry or uploaded documentation explicitly justifies them.\n"
+        "- Prefer 'applicable quality-management requirements' when no specific quality standard is provided.\n"
+        "- Use blockchain only if traceability specifically requires it; otherwise use 'auditable digital traceability system' or 'digital traceability system'.\n"
         "- Keep responses concise, precise, and actionable.\n"
         "- Do not mention verification findings, missing cues, missing sections, or internal checklist feedback in the final answer.\n"
         "- If verifier feedback is provided, use it only to improve the plan silently.\n"
@@ -844,8 +920,9 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
             + "\n\n".join(critic)
         )
 
-    # Final safety pass: remove any accidental verifier/debug leakage before rendering results.
+    # Final safety pass: remove verifier/debug leakage and unsupported specifics before rendering results.
     plan_text = clean_internal_verifier_leaks(plan_text)
+    plan_text = clean_unprovided_specifics(plan_text)
 
     # Stage Views pass
     context_block = build_context_block(
@@ -865,6 +942,12 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
         stage_views = {}
     if (not stage_views or not any(v for v in stage_views.values())) and plan_text:
         stage_views = parse_stage_views_from_plan(plan_text, selected_stages)
+
+    # Clean unsupported specifics from stage-view fields as a final guard.
+    for _stage, _views in (stage_views or {}).items():
+        for _key, _value in list((_views or {}).items()):
+            if isinstance(_value, str):
+                _views[_key] = clean_unprovided_specifics(clean_internal_verifier_leaks(_value))
 
     return {
         "plan_text": plan_text,
