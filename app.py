@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v7_evidence_based_expected_5s"
+CACHE_REVISION = "benchmark_clean_v8_human_approved_ai_updates"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -419,6 +419,40 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Keep AI as decision support, not autonomous actuation or automatic document/process modification.
+    autonomous_update_patterns = [
+        (
+            r"\bclosed[-\s]?loop feedback system where AI recommendations update SOPs and control plans automatically\b",
+            "human-approved feedback loop where AI recommendations are reviewed before updating SOPs and control plans",
+        ),
+        (
+            r"\bAI recommendations update SOPs and control plans automatically\b",
+            "AI recommendations are reviewed by humans before updating SOPs and control plans",
+        ),
+        (
+            r"\bAI recommendations automatically update SOPs and control plans\b",
+            "AI recommendations are reviewed by humans before updating SOPs and control plans",
+        ),
+        (
+            r"\bautomatically update SOPs and control plans\b",
+            "support human-approved updates to SOPs and control plans",
+        ),
+        (
+            r"\bautomatically update (?:MES/ERP records|equipment parameters|supplier status|production settings|operational records)\b",
+            "support human-reviewed updates to operational records or settings",
+        ),
+        (
+            r"\bautonomously (?:update|modify|change) (?:SOPs|control plans|MES/ERP records|equipment parameters|supplier status|production settings|operational records)\b",
+            "recommend human-reviewed updates to operational documents or settings",
+        ),
+        (
+            r"\bwithout human (?:review|approval)\b",
+            "with human review and approval",
+        ),
+    ]
+    for pat, repl in autonomous_update_patterns:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
     # Remove common unsupported performance targets while preserving the metric to be checked.
     replacements = [
         (r"\bachieve\s+\d+(?:\.\d+)?\s*%\+?\s+first[-\s]?pass\s+yield\b",
@@ -638,6 +672,8 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         "- Do not invent numerical targets, percentages, deadlines, defect rates, recovery rates, or performance thresholds.\n"
         "- Use generic quality language unless a specific sector standard is explicitly provided.\n"
         "- Prefer auditable digital traceability over blockchain unless blockchain is explicitly required.\n"
+        "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, or production settings.\n"
+        "- AI tools may recommend changes, but any operational update must require human review and approval.\n"
     )
 
 def parse_stage_views_json(llm_response, selected_stages):
@@ -939,6 +975,10 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- Do not use Safety as a 5S dimension label; use Safe. You may use safety as a normal noun only inside sentences.\n"
         "- In [Improvement Opportunities & Risks], organize I5S items using Safe, not Safety.\n"
         "- Never invent data; use the evidence only.\n"
+        "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records.\n"
+        "- AI may recommend updates, but all changes to SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records must require human review and approval.\n"
+        "- For Technology Transfer, digital twins and AI analytics support simulation, diagnosis, pilot evaluation, and decision support; they do not autonomously modify equipment settings, SOPs, control plans, or operational records.\n"
+        "- Closed-loop feedback means a human-approved feedback loop, not autonomous process modification.\n"
         "- Do not invent numerical targets, percentages, deadlines, defect rates, recovery rates, or performance thresholds unless they are explicitly provided by the user or uploaded documents.\n"
         "- If performance evaluation is needed, describe the metric to be checked without assigning a numerical value.\n"
         "- Do not mention industry-specific standards such as ISO 13485 unless the selected industry or uploaded documentation explicitly justifies them.\n"
