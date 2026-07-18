@@ -779,21 +779,62 @@ objective = st.text_input(
     value=st.session_state.get("objective", "Design and ramp a flexible small manufacturing cell."),
     key="objective"
 )
-industry = st.selectbox(
-    "Industry:", ["Automotive","Electronics","Medical Devices","Consumer Goods","Other"],
-    index=st.session_state.get("industry_idx", 1), key="industry"
-)
-st.session_state["industry_idx"] = ["Automotive","Electronics","Medical Devices","Consumer Goods","Other"].index(industry)
 
-role_options = ["Design Engineer","Process Engineer","Manufacturing Engineer","Safety Supervisor",
-                "Sustainability Manager","Supply Chain Analyst","Manager/Decision Maker","Other"]
-role_selected = st.selectbox(
-    "Your role:", role_options,
-    index=st.session_state.get("role_idx", 2), key="user_role"
+# ------------------------ Industry ------------------------
+# Keep a closed list for convenience, but allow a custom industry when "Other" is selected.
+# The final variable passed to the LLM is `industry`, not the raw selectbox value.
+industry_options = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"]
+industry_choice = st.selectbox(
+    "Industry:",
+    industry_options,
+    index=st.session_state.get("industry_idx", 1),
+    key="industry_choice"
 )
-if role_selected == "Other":
-    role_selected = st.text_input("Please specify your role:", value=st.session_state.get("custom_role",""), key="custom_role") or "Other"
-st.session_state["role_idx"] = role_options.index("Other") if role_selected=="Other" else role_options.index(role_selected)
+st.session_state["industry_idx"] = industry_options.index(industry_choice)
+
+if industry_choice == "Other":
+    custom_industry = st.text_input(
+        "Please specify the industry:",
+        value=st.session_state.get("custom_industry", ""),
+        key="custom_industry",
+        placeholder="e.g., Precision component manufacturing, aerospace, semiconductors, food processing"
+    )
+    industry = custom_industry.strip() if custom_industry.strip() else "Other"
+else:
+    industry = industry_choice
+
+# ------------------------ Role ------------------------
+# Same logic for role: the LLM receives `role_selected`, which may be a custom role.
+role_options = [
+    "Design Engineer",
+    "Process Engineer",
+    "Manufacturing Engineer",
+    "Safety Supervisor",
+    "Sustainability Manager",
+    "Supply Chain Analyst",
+    "Manager/Decision Maker",
+    "Other"
+]
+role_choice = st.selectbox(
+    "Your role:",
+    role_options,
+    index=st.session_state.get("role_idx", 2),
+    key="role_choice"
+)
+st.session_state["role_idx"] = role_options.index(role_choice)
+
+if role_choice == "Other":
+    custom_role = st.text_input(
+        "Please specify your role:",
+        value=st.session_state.get("custom_role", ""),
+        key="custom_role",
+        placeholder="e.g., Manufacturing systems consultant, plant manager, quality engineer"
+    )
+    role_selected = custom_role.strip() if custom_role.strip() else "Other"
+else:
+    role_selected = role_choice
+
+st.caption(f"Scenario context used by the model: **{industry}** industry | **{role_selected}** role")
 
 # 2) Manufacturing System Type
 st.header("2. Select Manufacturing System Type")
@@ -847,6 +888,16 @@ enable_agent = True
 auto_iterate = True
 
 if st.button("Generate Plan & Recommendations"):
+    # Guardrails for custom values. These fields are injected into the LLM prompt,
+    # so they should not remain as a generic "Other" label.
+    if industry_choice == "Other" and industry == "Other":
+        st.error("Please specify the industry before generating the plan.")
+        st.stop()
+
+    if role_choice == "Other" and role_selected == "Other":
+        st.error("Please specify the role before generating the plan.")
+        st.stop()
+
     with st.spinner("Agent planning, executing tools, stage views, and refining..."):
         cache_key = _cache_key(
             objective, system_type, industry, role_selected,
