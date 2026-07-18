@@ -61,7 +61,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v10_complete_stage_views"
+CACHE_REVISION = "benchmark_clean_v11_facility_design_centered"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -188,7 +188,7 @@ supply_chain_recommendations = {
         "Technical-economic benchmarking; equipment/technology selection; pilot lines; joint-development trials; installation qualification; first-article inspection; predictive maintenance; MES/ERP data collection; digital twins for simulation and lifecycle learning; human-approved feedback loops."
     ],
     "Facility Design":[
-        "Local/resilient networks; make-or-buy; green infra; layout/OEE simulation; cyber-by-design."
+        "Facility-centred design: product/process requirements; demand and capacity assumptions; make-or-buy as supporting logic; equipment/system selection; utilities and facility constraints; shop-floor layout; material flow; storage/buffers; human movement; safety zones; commissioning; site acceptance; ramp-up evaluation; future reconfiguration; reuse/decommissioning. Cyber-by-design, sensing, traceability, and supplier networks are supporting elements, not the main facility-design flow."
     ],
 }
 
@@ -435,6 +435,20 @@ def clean_unprovided_specifics(plan_text: str) -> str:
         ),
     ]
     for pat, repl in sustainability_target_patterns:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
+    # Clarify that human review is a governance control, not a risk by itself.
+    governance_risk_patterns = [
+        (
+            r"Risk\s*[:\-–]\s*acting on AI recommendations with human review and approval",
+            "Risk: unclear responsibility for reviewing AI recommendations and approving operational changes",
+        ),
+        (
+            r"Risk\s*[:\-–]\s*acting on AI recommendations with human approval",
+            "Risk: unclear responsibility for reviewing AI recommendations and approving operational changes",
+        ),
+    ]
+    for pat, repl in governance_risk_patterns:
         cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
 
     # Keep AI as decision support, not autonomous actuation or automatic document/process modification.
@@ -693,6 +707,10 @@ def build_stage_views_prompt_json(context_block, selected_stages):
         "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, or production settings.\n"
         "- AI tools may recommend changes, but any operational update must require human review and approval.\n"
         "- For Technology Transfer, keep the stage views specific: technical-economic benchmarking, equipment/technology selection, pilot-line or joint-development trials, process plans, SOPs, installation qualification, first-article inspection, MES/ERP connection, and digital-twin lifecycle learning where relevant.\n"
+        "- For Facility Design, keep the stage views facility-centred: product/process requirements, capacity assumptions, equipment/system selection, utilities, shop-floor layout, material flow, storage/buffers, human movement, safety zones, commissioning, site acceptance, ramp-up evaluation, and future reconfiguration.\n"
+        "- For Facility Design, cyber-by-design, sensing infrastructure, and digital traceability are supporting Information/Resource elements, not the main Advanced Development activity.\n"
+        "- For Facility Design Advanced Development, prioritize layout, capacity, material flow, buffer/storage areas, safety zones, utilities, and manufacturing strategy rather than cybersecurity alone.\n"
+        "- For Facility Design Launching, prioritize build/install, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.\n"
         "- Never leave Function, Organization, Information, Resource, or Performance blank. If the plan is concise, infer these fields from the selected LCE activity and the raw plan line.\n"
         "- Performance should describe an evaluation criterion, approval point, readiness check, or tollgate, not a vague phrase such as 'confirmed' by itself.\n"
     )
@@ -846,7 +864,7 @@ def build_deterministic_stage_views(system_type: str, selected_stages: list, pla
             "Ideation": {"Function": "Specify product, process, demand, and facility requirements that frame the new or transformed manufacturing system.", "Organization": "Manufacturing engineering, operations, product engineering, facilities, safety, and supply-chain stakeholders define requirements.", "Information": "Product requirements, process requirements, demand assumptions, safety constraints, sustainability criteria, and site constraints.", "Resource": "Process data, product documentation, site information, stakeholder workshops, and preliminary capacity assumptions.", "Performance": "Facility requirements approved for manufacturing-system and equipment selection."},
             "Basic Development": {"Function": "Select manufacturing systems, equipment, utilities, and facility concepts that satisfy process and capacity needs.", "Organization": "Facilities engineering, manufacturing engineering, procurement, operations, safety, and sustainability teams compare alternatives.", "Information": "Equipment list, system alternatives, utility requirements, make-or-buy logic, and preliminary investment assumptions.", "Resource": "Supplier data, equipment catalogues, layout tools, capacity models, and cost or sustainability screening tools.", "Performance": "Facility concept and equipment/system selection reviewed against process, capacity, safety, and sustainability requirements."},
             "Advanced Development": {"Function": "Design shop-floor layout, capacity, material flow, manufacturing strategy, safety zones, and digital infrastructure.", "Organization": "Industrial engineering, facilities, operations, maintenance, safety, IT/OT, and logistics teams develop the integrated layout.", "Information": "Layout drawings, capacity analysis, material-flow map, safety plan, utility plan, and digital-infrastructure requirements.", "Resource": "Layout simulation, DES or capacity tools, CAD/BIM resources, safety assessment tools, and logistics data.", "Performance": "Layout and capacity design validated through flow, safety, and operational-readiness review."},
-            "Launching": {"Function": "Build, install, commission, ramp up, and evaluate the facility and manufacturing systems.", "Organization": "Construction or facilities team, equipment suppliers, operations, maintenance, quality, safety, and IT/OT coordinate launch.", "Information": "Installation records, commissioning checklist, ramp-up plan, training records, safety sign-off, and performance evidence.", "Resource": "Construction resources, installation tools, commissioning protocols, training materials, MES/SCADA infrastructure, and inspection tools.", "Performance": "Facility readiness confirmed through commissioning, training, safety sign-off, and human-approved ramp-up decision."},
+            "Launching": {"Function": "Build, install, commission, ramp up, and evaluate the facility and manufacturing systems.", "Organization": "Construction or facilities team, equipment suppliers, operations, maintenance, quality, safety, and IT/OT coordinate launch.", "Information": "Installation records, commissioning checklist, ramp-up plan, training records, safety sign-off, and performance evidence.", "Resource": "Construction resources, installation tools, commissioning protocols, training materials, MES/SCADA infrastructure, and inspection tools.", "Performance": "Facility readiness confirmed through commissioning, site acceptance testing, training, safety sign-off, and human-approved ramp-up decision."},
             "End-of-Life": {"Function": "Audit the facility for reuse, reconfiguration, decommissioning, or transformation.", "Organization": "Facilities, asset management, sustainability, finance, operations, and safety teams evaluate future use or closure.", "Information": "Facility audit, asset inventory, reconfiguration options, decommissioning plan, sustainability assessment, and lessons learned.", "Resource": "Asset records, maintenance data, facility drawings, environmental records, and decommissioning or reconfiguration partners.", "Performance": "Reuse, reconfiguration, or decommissioning decision approved with documented asset and sustainability evidence."},
         },
     }
@@ -1147,7 +1165,15 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- For Technology Transfer, prioritize technical specifications; technical-economic benchmarking; technology/equipment selection; supplier or equipment shortlist; pilot-line or joint-development trials; feasibility evidence; process plans; SOPs; control documentation; installation qualification; first-article inspection; ramp-up; MES/ERP data collection; digital twin support for simulation and lifecycle learning; and lessons learned.\n"
         "- For Technology Transfer, do not reduce the output to generic technology selection. The plan should explicitly show the pathway: technical specifications -> benchmarking -> equipment/technology selection -> pilot-line or joint-development trials -> process plan and SOPs -> installation qualification and first-article inspection -> human-approved digital-twin learning.\n"
         "- For Technology Transfer, any AI or digital-twin recommendation must be reviewed by engineers before changing SOPs, control plans, equipment parameters, MES/ERP records, or operational settings.\n"
-        "- For Facility Design, prioritize process requirements, equipment selection, layout/capacity design, installation/ramp-up, safety, sustainability, and future reconfiguration.\n\n"
+        "- For Facility Design, the main logic must be facility-centred: product/process requirements, demand and capacity assumptions, equipment/system selection, utilities, shop-floor layout, material flow, storage and buffer areas, human movement, safety zones, installation, commissioning, site acceptance, ramp-up evaluation, and future reconfiguration.\n"
+        "- For Facility Design, make-or-buy analysis and supplier networks are supporting decisions; they must not replace the facility requirements brief, capacity model, layout, material-flow plan, or commissioning logic.\n"
+        "- For Facility Design, cyber-by-design, sensing infrastructure, digital traceability, and AI analytics are supporting elements; they must not become the main Advanced Development activity.\n"
+        "- For Facility Design Ideation, prioritize product/process requirements, demand assumptions, site constraints, facility requirements brief, and preliminary capacity assumptions; do not make the main deliverable only a supplier shortlist.\n"
+        "- For Facility Design Basic Development, prioritize equipment/system selection, utility requirements, make-or-buy logic, facility concept, and preliminary capacity model.\n"
+        "- For Facility Design Advanced Development, prioritize shop-floor layout, capacity model, material-flow logic, storage/buffer areas, human movement, safety zones, utilities, and manufacturing strategy.\n"
+        "- For Facility Design Launching, prioritize build/install, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.\n"
+        "- For Facility Design End-of-Life, prioritize reuse, transformation, decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned.\n"
+        "- In risk statements, human review and approval should be framed as a governance control, not as a risk.\n\n"
         f"Company objective: {state.objective}\n"
         f"User role: {state.role}\n\n"
         "Selected LCE stages:\n"
