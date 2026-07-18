@@ -1,4 +1,4 @@
-# LCE + 5S Manufacturing System & Supply Chain Decision Support — AI Agent
+# LCE + 5S Manufacturing System & Supply Chain Decision Support
 # Authors: Dr. J. Isabel Méndez & Dr. Arturo Molina
 # Notes:
 # - Bounded AI AGENT (planner → tools → reflector) that USES an LLM.
@@ -15,10 +15,11 @@ import json, re
 import hashlib
 import math
 import random
+from manufacturing_knowledge_base import KNOWLEDGE_BASE_ID, KNOWLEDGE_BASE_VERSION, build_kb_evidence
 
 # ------------------------ App + API setup ------------------------
 st.set_page_config(page_title="LCE + 5S", layout="wide")
-st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support (AI Agent)")
+st.title("LCE + 5S Manufacturing System & Supply Chain Decision Support")
 st.markdown("Developed by: **Dr. J. Isabel Méndez** & **Dr. Arturo Molina**")
 
 
@@ -61,7 +62,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = "benchmark_clean_v11_facility_design_centered"
+CACHE_REVISION = f"benchmark_clean_v11_facility_design_centered__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -266,6 +267,17 @@ def retrieve_domain_evidence(system_type, industry, selected_stages, five_s_leve
         techs = five_s_taxonomy[dim][lvl].get("tech", [])
         if techs:
             lines.append(f"- {dim} (L{lvl}): " + "; ".join(techs))
+
+    # Frozen curated knowledge base context. This is not runtime retrieval/RAG;
+    # it is a versioned knowledge artifact imported with the application.
+    try:
+        kb_evidence = build_kb_evidence(system_type, stages)
+        if kb_evidence:
+            lines.append("\nFROZEN CURATED KNOWLEDGE BASE CONTEXT:")
+            lines.append(kb_evidence)
+    except Exception:
+        lines.append("\nFROZEN CURATED KNOWLEDGE BASE CONTEXT: unavailable; using embedded fallback rules.")
+
     return "\n".join(lines)
 
 # ------------------------ Plan parsing helpers ------------------------

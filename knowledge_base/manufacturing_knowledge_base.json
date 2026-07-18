@@ -1,0 +1,907 @@
+{
+  "metadata": {
+    "kb_id": "manufacturing_knowledge_base",
+    "name": "Frozen Manufacturing Knowledge Base for LCE-I5S Decision Support",
+    "version": "1.0.0",
+    "date_frozen": "2026-07-18",
+    "runtime_retrieval": false,
+    "purpose": "Frozen, manually curated procedural knowledge base for a controlled LLM-based decision-support framework in manufacturing-system design. It supports generation for Product Transfer, Technology Transfer, and Facility Design scenarios, organised by LCE stage and Industry 5.0 I5S dimension.",
+    "important_boundary_conditions": [
+      "This knowledge base is used for generation in the full-framework configuration only.",
+      "It is not a RAG index and does not perform runtime retrieval.",
+      "It excludes Ramírez, Cortés, and Molina's IPPMD-based lightweight manufacturing-system design framework because that framework is reserved as an external procedural benchmark.",
+      "It does not provide empirical validation, plant-floor performance evidence, or automatic implementation authority.",
+      "AI outputs must remain decision support; changes to SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records require human review and approval."
+    ],
+    "source_basis": [
+      {
+        "source": "Digital Technologies for Sustainable Manufacturing, Chapter 1",
+        "use": "LCE framing; lifecycle scope from materials/products/processes/systems/supply chains to end-of-life; integration of I5S principles."
+      },
+      {
+        "source": "Digital Technologies for Sustainable Manufacturing, Chapter 2",
+        "use": "Definitions of Social, Sustainable, Sensing, Smart, and Safe systems and their lifecycle use from ideation to end-of-life."
+      },
+      {
+        "source": "Digital Technologies for Sustainable Manufacturing, Chapter 6",
+        "use": "Manufacturing-system entity; Product Transfer, Technology Transfer, Facility Design; LCE stage activities, inputs, and outputs."
+      },
+      {
+        "source": "Digital Technologies for Sustainable Manufacturing, Chapter 7",
+        "use": "Supply-chain development logic; resilience, supplier engagement, transparency, real-time decision support, and end-of-life recovery."
+      },
+      {
+        "source": "Standard manufacturing engineering methods and safety/environmental management practice",
+        "use": "Representative tools and methods such as APQP, SPC, FMEA, HAZOP, LOTO, ISO 14001, ISO 45001, ISO 13849, IEC 62443, MES/MOM, SCADA, OPC-UA/MQTT, APS, digital twins, DES, CAD/BIM."
+      }
+    ],
+    "excluded_generation_sources": [
+      "Ramírez, Cortés, and Molina IPPMD-based lightweight manufacturing-system design framework (reserved for external benchmark scoring, not generation).",
+      "Reviewer reports or benchmark scoring rubrics.",
+      "Unverified public web sources at runtime.",
+      "User-unprovided plant-floor numerical targets, deadlines, defect rates, recovery rates, or certified performance claims."
+    ],
+    "file_names": {
+      "python_module": "manufacturing_knowledge_base.py",
+      "json": "knowledge_base/manufacturing_knowledge_base.json",
+      "csv": "knowledge_base/manufacturing_knowledge_base.csv",
+      "markdown": "knowledge_base/manufacturing_knowledge_base.md"
+    },
+    "version_note": "File names are stable. Versioning is stored in metadata and repository tags, not in the filename."
+  },
+  "schema": {
+    "entry_fields": [
+      "typology",
+      "lce_stage",
+      "stage_alias_from_book",
+      "core_activity",
+      "engineering_analysis_function",
+      "engineering_synthesis_organization",
+      "engineering_synthesis_information",
+      "engineering_synthesis_resource",
+      "engineering_evaluation_performance",
+      "representative_tools_methods",
+      "expected_deliverables_tollgates",
+      "i5s_cues",
+      "source_basis",
+      "prompt_priority"
+    ],
+    "i5s_fields": [
+      "definition",
+      "typical_cues",
+      "representative_tools",
+      "evidence_rule"
+    ]
+  },
+  "i5s_dimensions": {
+    "Social": {
+      "definition": "Human-centred and socially responsible manufacturing-system design, including ergonomics, training, inclusion, operator participation, fair work, and stakeholder engagement.",
+      "typical_cues": [
+        "ergonomics",
+        "human factors",
+        "operator training",
+        "LMS",
+        "participatory design",
+        "co-creation",
+        "workforce skills"
+      ],
+      "representative_tools": [
+        "ergonomic checklists",
+        "human-factors assessment",
+        "training matrix",
+        "learning management system",
+        "operator feedback workshop"
+      ],
+      "evidence_rule": "Increase expected maturity only when at least one concrete human-centred action or deliverable is present."
+    },
+    "Sustainable": {
+      "definition": "Environmentally responsible manufacturing-system design across lifecycle stages, including resource efficiency, energy monitoring, LCA, circularity, reuse, recycling, and reverse logistics.",
+      "typical_cues": [
+        "LCA",
+        "energy monitoring",
+        "carbon accounting",
+        "resource efficiency",
+        "waste reduction",
+        "reuse",
+        "recycling",
+        "reverse logistics",
+        "circular economy"
+      ],
+      "representative_tools": [
+        "LCA spreadsheet/tool",
+        "energy meters",
+        "ISO 14001 checklist",
+        "material recovery plan",
+        "sustainability dashboard"
+      ],
+      "evidence_rule": "Avoid claiming verified carbon or resource reductions unless measured/simulated evidence is provided."
+    },
+    "Sensing": {
+      "definition": "Data capture and monitoring capability for manufacturing assets, processes, quality, safety, and lifecycle states.",
+      "typical_cues": [
+        "SCADA",
+        "DAQ",
+        "OPC-UA",
+        "MQTT",
+        "IIoT",
+        "edge sensors",
+        "condition monitoring",
+        "real-time monitoring"
+      ],
+      "representative_tools": [
+        "thermocouples",
+        "limit switches",
+        "vibration sensors",
+        "power meters",
+        "DAQ modules",
+        "SCADA",
+        "edge gateway"
+      ],
+      "evidence_rule": "Require concrete sensors, data pathways, monitoring targets, or data-collection deliverables."
+    },
+    "Smart": {
+      "definition": "Decision-support, automation, analytics, simulation, optimization, and digital-twin capability that improves planning, control, diagnosis, and lifecycle learning without autonomous unapproved actuation.",
+      "typical_cues": [
+        "PLC",
+        "PID",
+        "MES",
+        "MOM",
+        "APS",
+        "optimization",
+        "predictive maintenance",
+        "digital twin",
+        "simulation",
+        "analytics"
+      ],
+      "representative_tools": [
+        "MES/MOM",
+        "APS",
+        "digital twin",
+        "DES",
+        "predictive-maintenance model",
+        "optimization model",
+        "PLC/PID control"
+      ],
+      "evidence_rule": "AI and digital twins may recommend or simulate; operational changes require human approval."
+    },
+    "Safe": {
+      "definition": "Occupational, machine, process, environmental, and cyber-physical safety controls across the manufacturing-system lifecycle.",
+      "typical_cues": [
+        "ISO 45001",
+        "ISO 13849",
+        "IEC 61508",
+        "IEC 62061",
+        "FMEA",
+        "HAZOP",
+        "LOPA",
+        "LOTO",
+        "IEC 62443",
+        "cybersecurity"
+      ],
+      "representative_tools": [
+        "risk matrix",
+        "FMEA",
+        "HAZOP",
+        "LOPA",
+        "LOTO procedure",
+        "safety sign-off",
+        "machine-safety assessment",
+        "OT cybersecurity checklist"
+      ],
+      "evidence_rule": "Distinguish functional/machine safety from OT cybersecurity; do not use Safety as the I5S label, use Safe."
+    }
+  },
+  "exclusion_rules": [
+    "Do not claim industrial validation or plant-floor performance improvement from generated text alone.",
+    "Do not invent numerical targets, percentages, deadlines, defect rates, recovery rates, first-pass yield thresholds, carbon-reduction targets, or material-recovery percentages.",
+    "Do not use sector-specific standards such as ISO 13485 unless the selected industry or uploaded documentation explicitly justifies them.",
+    "Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, maintenance actions, or operational records.",
+    "Do not use blockchain unless traceability specifically requires it; prefer auditable digital traceability or digital traceability system.",
+    "Use Industry 5.0 I5S labels Social, Sustainable, Sensing, Smart, and Safe; avoid using Safety as a dimension label.",
+    "Treat cyber-by-design, sensing, and digital traceability as support functions in Facility Design, not as replacements for layout, capacity, material flow, utilities, safety zones, commissioning, and reconfiguration logic.",
+    "Keep Ramírez et al. outside generation; use it only for external procedural benchmark scoring."
+  ],
+  "entries": [
+    {
+      "typology": "Product Transfer",
+      "lce_stage": "Ideation",
+      "stage_alias_from_book": "Idea | Imagination",
+      "core_activity": "Define product information, BOM, materials, standards, quality requirements, and delivery expectations.",
+      "engineering_analysis_function": "Capture market/customer requirements, preliminary design concepts, existing product data, and product-transfer constraints.",
+      "engineering_synthesis_organization": "Product engineering, manufacturing engineering, quality, procurement, and supply-chain teams.",
+      "engineering_synthesis_information": "BOM, material specification sheet, component standards, quality requirement matrix, estimated delivery needs, traceability needs.",
+      "engineering_synthesis_resource": "BOM tools, material databases, quality templates, stakeholder input, and supplier capability information.",
+      "engineering_evaluation_performance": "BOM and quality requirements approved as the basis for manufacturing and supplier planning.",
+      "representative_tools_methods": [
+        "BOM management",
+        "material database",
+        "quality requirement matrix",
+        "traceability template"
+      ],
+      "expected_deliverables_tollgates": [
+        "BOM draft",
+        "material specification sheet",
+        "quality requirement matrix",
+        "product-transfer requirement brief"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "stakeholder input"
+        ],
+        "Sustainable": [
+          "durability",
+          "recyclability"
+        ],
+        "Sensing": [
+          "traceability needs"
+        ],
+        "Smart": [
+          "BOM tools"
+        ],
+        "Safe": [
+          "quality/safety requirements"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Life Cycle diagram flow, Product Transfer description",
+        "Book ch.6, Idea | Imagination: Individual Component Specification"
+      ],
+      "prompt_priority": "Define product information, BOM, materials, standards, quality requirements, and delivery expectations."
+    },
+    {
+      "typology": "Product Transfer",
+      "lce_stage": "Basic Development",
+      "stage_alias_from_book": "Basic Development | Conceptualization",
+      "core_activity": "Define manufacturing and quality-control requirements for volume, cost, time, product attributes, tolerances, and acceptance variables.",
+      "engineering_analysis_function": "Translate BOM and product attributes into manufacturing specifications and quality-control parameters.",
+      "engineering_synthesis_organization": "Manufacturing engineering, process planning, quality assurance, supply-chain planning, and metrology support.",
+      "engineering_synthesis_information": "Manufacturing specification, quality-control parameters, inspection plan, acceptance criteria, control-variable definitions.",
+      "engineering_synthesis_resource": "APQP/SPC tools, process flow templates, metrology resources, inspection templates, and training materials.",
+      "engineering_evaluation_performance": "Manufacturing and inspection plans reviewed for feasibility before supplier qualification and launch preparation.",
+      "representative_tools_methods": [
+        "APQP",
+        "SPC",
+        "inspection planning",
+        "metrology",
+        "process flow diagram"
+      ],
+      "expected_deliverables_tollgates": [
+        "manufacturing specification",
+        "control plan",
+        "inspection plan",
+        "acceptance criteria",
+        "process flow diagram"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "workforce skill matrix"
+        ],
+        "Sustainable": [
+          "waste prevention via quality control"
+        ],
+        "Sensing": [
+          "inspection variables"
+        ],
+        "Smart": [
+          "SPC analysis"
+        ],
+        "Safe": [
+          "acceptance/rejection criteria"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Basic Development: Manufacturing and Quality Control Requirements"
+      ],
+      "prompt_priority": "Define manufacturing and quality-control requirements for volume, cost, time, product attributes, tolerances, and acceptance variables."
+    },
+    {
+      "typology": "Product Transfer",
+      "lce_stage": "Advanced Development",
+      "stage_alias_from_book": "Advanced Development | Design",
+      "core_activity": "Select manufacturing suppliers and partners based on capabilities, capacity, compliance, cost, quality, and risk.",
+      "engineering_analysis_function": "Evaluate supplier capabilities and qualification evidence against manufacturing specifications.",
+      "engineering_synthesis_organization": "Procurement, supply chain, quality, product engineering, and technical evaluation teams.",
+      "engineering_synthesis_information": "Supplier shortlist, qualification reports, audit evidence, supplier capability/capacity reports, risk assessment.",
+      "engineering_synthesis_resource": "AHP/TCO or similar MCDM tools, supplier data, audit checklists, capability matrix, and compliance screening.",
+      "engineering_evaluation_performance": "Supplier selection supported by qualification evidence and documented sourcing decision.",
+      "representative_tools_methods": [
+        "supplier MCDM",
+        "AHP",
+        "TCO",
+        "supplier audit",
+        "risk matrix",
+        "supplier capability assessment"
+      ],
+      "expected_deliverables_tollgates": [
+        "supplier shortlist",
+        "qualification report",
+        "supplier agreement/contract",
+        "supplier capability and capacity report"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "supplier engagement"
+        ],
+        "Sustainable": [
+          "supplier sustainability screening"
+        ],
+        "Sensing": [
+          "supplier data"
+        ],
+        "Smart": [
+          "MCDM scoring"
+        ],
+        "Safe": [
+          "compliance checks"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Advanced Development: Manufacturing Supplier Selection",
+        "Book ch.7, supplier engagement and resilience"
+      ],
+      "prompt_priority": "Select manufacturing suppliers and partners based on capabilities, capacity, compliance, cost, quality, and risk."
+    },
+    {
+      "typology": "Product Transfer",
+      "lce_stage": "Launching",
+      "stage_alias_from_book": "Launching | Creation/Operation",
+      "core_activity": "Manufacture, assemble, check quality controls, document delivery/inventory, train workforce, and manage ramp-up readiness.",
+      "engineering_analysis_function": "Execute manufacturing and assembly instructions, quality checks, training, and launch-readiness verification.",
+      "engineering_synthesis_organization": "Production team, quality manager, training coordinator, manufacturing engineering, and supply-chain team.",
+      "engineering_synthesis_information": "Assembly instructions, quality-control reports, acceptance criteria, training records, traceability log, delivery/inventory records.",
+      "engineering_synthesis_resource": "Assembly equipment, training materials, inspection tools, APQP/SPC records, and digital traceability system.",
+      "engineering_evaluation_performance": "Assembly readiness verified through acceptance criteria, training completion, quality-control evidence, traceability readiness, and ramp-up approval.",
+      "representative_tools_methods": [
+        "APQP",
+        "SPC",
+        "quality inspection",
+        "training matrix",
+        "traceability log",
+        "inventory documentation"
+      ],
+      "expected_deliverables_tollgates": [
+        "assembled components",
+        "quality-control report",
+        "delivery/inventory documentation",
+        "ramp-up checklist",
+        "traceability log"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "training"
+        ],
+        "Sustainable": [
+          "waste/rework reduction"
+        ],
+        "Sensing": [
+          "quality-control data"
+        ],
+        "Smart": [
+          "traceability system"
+        ],
+        "Safe": [
+          "safe assembly procedures"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Launching: Manufacturing and Assembly of Components"
+      ],
+      "prompt_priority": "Manufacture, assemble, check quality controls, document delivery/inventory, train workforce, and manage ramp-up readiness."
+    },
+    {
+      "typology": "Product Transfer",
+      "lce_stage": "End-of-Life",
+      "stage_alias_from_book": "End of Life",
+      "core_activity": "Plan disassembly, reuse, recycling, reverse logistics, contract closure, and product-transfer lifecycle documentation.",
+      "engineering_analysis_function": "Assess end-of-life options for components/products and define recovery, reuse, and reverse-logistics pathways.",
+      "engineering_synthesis_organization": "Sustainability, logistics, procurement, supplier management, product engineering, and quality teams.",
+      "engineering_synthesis_information": "Reverse-logistics plan, contract-closure checklist, disassembly instructions, recycling pathways, lessons learned.",
+      "engineering_synthesis_resource": "Disassembly tools, recycling contracts, supplier records, lifecycle-data repository, and traceability system.",
+      "engineering_evaluation_performance": "End-of-life and contract-closure plan approved with reuse, recycling, and reverse-logistics pathways documented.",
+      "representative_tools_methods": [
+        "reverse logistics",
+        "disassembly planning",
+        "recycling pathway",
+        "contract closure",
+        "lessons learned"
+      ],
+      "expected_deliverables_tollgates": [
+        "reverse-logistics plan",
+        "contract-closure checklist",
+        "disassembly instruction",
+        "recycling/reuse pathway"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "responsible decommissioning"
+        ],
+        "Sustainable": [
+          "reuse/recycling"
+        ],
+        "Sensing": [
+          "lifecycle records"
+        ],
+        "Smart": [
+          "reconfiguration/upgrade records"
+        ],
+        "Safe": [
+          "safe disposal"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, End of Life: 5S",
+        "Book ch.2, End-of-life 10R and 5S"
+      ],
+      "prompt_priority": "Plan disassembly, reuse, recycling, reverse logistics, contract closure, and product-transfer lifecycle documentation."
+    },
+    {
+      "typology": "Technology Transfer",
+      "lce_stage": "Ideation",
+      "stage_alias_from_book": "Idea | Imagination",
+      "core_activity": "Capture component or component-family specifications: geometry, drawings, materials, and production rates/batch size.",
+      "engineering_analysis_function": "Capture technical specifications, geometry, material data, production-rate assumptions, and feasibility constraints.",
+      "engineering_synthesis_organization": "Product engineering, manufacturing engineering, materials, quality, and technology specialists.",
+      "engineering_synthesis_information": "Technical specification sheet, geometric data/drawings, material data sheets, production batch-size documentation.",
+      "engineering_synthesis_resource": "CAD models, material databases, supplier capability data, and technical-economic benchmarking inputs.",
+      "engineering_evaluation_performance": "Technical specification sheet approved by product and manufacturing engineering for downstream technology-selection decisions.",
+      "representative_tools_methods": [
+        "CAD",
+        "material data sheet",
+        "technical specification",
+        "benchmarking input"
+      ],
+      "expected_deliverables_tollgates": [
+        "technical specification sheet",
+        "geometry/drawing package",
+        "material data sheet",
+        "batch-size documentation"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "engineering collaboration"
+        ],
+        "Sustainable": [
+          "material selection"
+        ],
+        "Sensing": [
+          "data requirements"
+        ],
+        "Smart": [
+          "CAD/CAM data"
+        ],
+        "Safe": [
+          "technical constraints"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Idea | Imagination: Technology transfer Individual Component Specification"
+      ],
+      "prompt_priority": "Capture component or component-family specifications: geometry, drawings, materials, and production rates/batch size."
+    },
+    {
+      "typology": "Technology Transfer",
+      "lce_stage": "Basic Development",
+      "stage_alias_from_book": "Basic Development | Conceptualization",
+      "core_activity": "Evaluate machines, material-handling equipment, tooling, jigs/fixtures, and supporting tools to select manufacturing resources.",
+      "engineering_analysis_function": "Compare manufacturing technologies and equipment using technical-economic, feasibility, capacity, and sustainability criteria.",
+      "engineering_synthesis_organization": "Manufacturing engineering, procurement, process engineering, quality, maintenance, and equipment suppliers.",
+      "engineering_synthesis_information": "Benchmark report, equipment/technology shortlist, supplier data, feasibility assumptions, pilot-line or joint-development trial plan.",
+      "engineering_synthesis_resource": "Equipment catalogues, supplier trials, pilot-line resources, AHP/TCO or similar decision tools, feasibility-analysis templates.",
+      "engineering_evaluation_performance": "Technology-selection decision supported by benchmark evidence, equipment shortlist, and human-approved feasibility review.",
+      "representative_tools_methods": [
+        "technical-economic benchmarking",
+        "equipment shortlist",
+        "AHP/TCO",
+        "pilot-line trial",
+        "joint-development trial",
+        "resource-selection matrix"
+      ],
+      "expected_deliverables_tollgates": [
+        "technology/equipment selection report",
+        "equipment specification sheet",
+        "preliminary process flowchart",
+        "pilot-trial plan"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "cross-functional review"
+        ],
+        "Sustainable": [
+          "resource efficiency"
+        ],
+        "Sensing": [
+          "equipment monitoring requirements"
+        ],
+        "Smart": [
+          "resource optimization"
+        ],
+        "Safe": [
+          "equipment safety criteria"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Basic Development: Manufacturing Resources Specification and Selection",
+        "Book ch.6, Ten Core Technologies"
+      ],
+      "prompt_priority": "Evaluate machines, material-handling equipment, tooling, jigs/fixtures, and supporting tools to select manufacturing resources."
+    },
+    {
+      "typology": "Technology Transfer",
+      "lce_stage": "Advanced Development",
+      "stage_alias_from_book": "Advanced Development | Design",
+      "core_activity": "Develop process plan, SOPs, control documentation, inspection criteria, and data-collection logic for the selected technology.",
+      "engineering_analysis_function": "Define process flow, raw materials, tools, fixtures, gauges, SOPs, quality-control process documentation, and MES/ERP data requirements.",
+      "engineering_synthesis_organization": "Process engineering, quality assurance, automation/MES team, maintenance, and operations representatives.",
+      "engineering_synthesis_information": "Detailed process charts, control plan, SOP draft, inspection criteria, MES/ERP data requirements, pilot-validation evidence.",
+      "engineering_synthesis_resource": "SOP templates, quality tools, metrology resources, MES/ERP interface definitions, predictive-maintenance inputs, digital-twin/simulation support.",
+      "engineering_evaluation_performance": "Process plan and control documentation validated for pilot testing with a human-approved SOP baseline.",
+      "representative_tools_methods": [
+        "process chart",
+        "SOP",
+        "control plan",
+        "inspection criteria",
+        "MES/ERP",
+        "predictive maintenance",
+        "digital twin"
+      ],
+      "expected_deliverables_tollgates": [
+        "detailed process chart",
+        "required tools/fixtures/gauges list",
+        "SOP draft",
+        "quality-control documentation",
+        "pilot-validation package"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "operator input to SOPs"
+        ],
+        "Sustainable": [
+          "process efficiency"
+        ],
+        "Sensing": [
+          "data collection logic"
+        ],
+        "Smart": [
+          "digital twin/predictive maintenance"
+        ],
+        "Safe": [
+          "risk review for selected technology"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Advanced Development: Process Plan",
+        "Book ch.6, Ten Core Technologies"
+      ],
+      "prompt_priority": "Develop process plan, SOPs, control documentation, inspection criteria, and data-collection logic for the selected technology."
+    },
+    {
+      "typology": "Technology Transfer",
+      "lce_stage": "Launching",
+      "stage_alias_from_book": "Launching | Creation/Operation",
+      "core_activity": "Set up, test, qualify, and ramp up equipment; conduct pilot production and first-article inspection.",
+      "engineering_analysis_function": "Install, qualify, test, and ramp up equipment through installation qualification, pilot production, first-article inspection, and deviation review.",
+      "engineering_synthesis_organization": "Commissioning team, operations, maintenance, quality, supplier technical support, and process engineering.",
+      "engineering_synthesis_information": "Installation qualification report, calibration records, ramp-up checklist, first-article inspection report, deviation log, approval evidence.",
+      "engineering_synthesis_resource": "Installation tools, calibration equipment, pilot-line resources, inspection systems, MES/SCADA data, digital-twin/simulation support.",
+      "engineering_evaluation_performance": "Equipment readiness confirmed through installation qualification, first-article inspection, and human-approved production ramp-up decision.",
+      "representative_tools_methods": [
+        "installation qualification",
+        "calibration",
+        "pilot production",
+        "first-article inspection",
+        "ramp-up checklist",
+        "MES/SCADA"
+      ],
+      "expected_deliverables_tollgates": [
+        "operational equipment",
+        "test result/validation report",
+        "ramp-up checklist",
+        "first-article inspection report",
+        "initial production output"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "training during ramp-up"
+        ],
+        "Sustainable": [
+          "energy/process monitoring"
+        ],
+        "Sensing": [
+          "SCADA/MES data"
+        ],
+        "Smart": [
+          "digital twin support"
+        ],
+        "Safe": [
+          "commissioning safety checks"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Launching: Equipment Set-up and Ramp-up of Production"
+      ],
+      "prompt_priority": "Set up, test, qualify, and ramp up equipment; conduct pilot production and first-article inspection."
+    },
+    {
+      "typology": "Technology Transfer",
+      "lce_stage": "End-of-Life",
+      "stage_alias_from_book": "End of Life",
+      "core_activity": "Retire or adapt equipment, document performance and failures, and update lifecycle-learning records for future transfers.",
+      "engineering_analysis_function": "Assess equipment retirement/adaptation options, failure history, maintainability, reuse/recycling potential, and lessons learned.",
+      "engineering_synthesis_organization": "Asset management, maintenance, sustainability/logistics, engineering knowledge management, and operations.",
+      "engineering_synthesis_information": "End-of-life report, failure-history log, lessons-learned archive, digital-twin lifecycle update, reuse/recycling plan.",
+      "engineering_synthesis_resource": "Maintenance records, MES/ERP or historian data, decommissioning tools, recycling/reuse partners, digital-twin records.",
+      "engineering_evaluation_performance": "Closure approved after performance history, failure lessons, and reuse or retirement decisions are documented for future technology-transfer learning.",
+      "representative_tools_methods": [
+        "failure-history log",
+        "digital twin update",
+        "lessons learned",
+        "asset recovery",
+        "equipment adaptation"
+      ],
+      "expected_deliverables_tollgates": [
+        "end-of-life report",
+        "lessons-learned archive",
+        "digital-twin lifecycle update",
+        "reuse/recycling plan"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "knowledge retention"
+        ],
+        "Sustainable": [
+          "equipment reuse/recycling"
+        ],
+        "Sensing": [
+          "performance/failure records"
+        ],
+        "Smart": [
+          "lifecycle learning"
+        ],
+        "Safe": [
+          "safe decommissioning"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, End of Life: 5S",
+        "Book ch.2, End-of-life 10R and 5S"
+      ],
+      "prompt_priority": "Retire or adapt equipment, document performance and failures, and update lifecycle-learning records for future transfers."
+    },
+    {
+      "typology": "Facility Design",
+      "lce_stage": "Ideation",
+      "stage_alias_from_book": "Idea | Imagination",
+      "core_activity": "Specify product, process, production-volume, and facility requirements to initiate new or transformed facility design.",
+      "engineering_analysis_function": "Define product/process requirements, demand scenarios, facility constraints, site assumptions, and human-factors criteria.",
+      "engineering_synthesis_organization": "Manufacturing engineering, operations, product engineering, facilities, safety, ergonomics, sustainability, and supply-chain stakeholders.",
+      "engineering_synthesis_information": "Facility requirements brief, process-flow assumptions, production-volume forecasts, site constraints, ergonomic criteria, sustainability criteria.",
+      "engineering_synthesis_resource": "Process data, product documentation, site information, stakeholder workshops, preliminary capacity assumptions, ergonomic assessment data.",
+      "engineering_evaluation_performance": "Facility requirements brief approved as the ideation gate for manufacturing-system and equipment selection.",
+      "representative_tools_methods": [
+        "facility requirements brief",
+        "process flow diagram",
+        "demand scenario",
+        "stakeholder workshop",
+        "ergonomic assessment"
+      ],
+      "expected_deliverables_tollgates": [
+        "facility requirements brief",
+        "initial layout concept",
+        "manufacturing process specification",
+        "capacity assumption record"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "ergonomic criteria"
+        ],
+        "Sustainable": [
+          "sustainability criteria"
+        ],
+        "Sensing": [
+          "future monitoring needs"
+        ],
+        "Smart": [
+          "scenario planning"
+        ],
+        "Safe": [
+          "site/safety constraints"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Idea | Imagination: Facility Design Product and Manufacturing Process Specification"
+      ],
+      "prompt_priority": "Specify product, process, production-volume, and facility requirements to initiate new or transformed facility design."
+    },
+    {
+      "typology": "Facility Design",
+      "lce_stage": "Basic Development",
+      "stage_alias_from_book": "Basic Development | Conceptualization",
+      "core_activity": "Select manufacturing systems, equipment, utilities, and facility concepts that satisfy process and capacity needs.",
+      "engineering_analysis_function": "Evaluate available technology, machines, material handling equipment, tooling, jigs/fixtures, utility needs, and make-or-buy logic.",
+      "engineering_synthesis_organization": "Facilities engineering, manufacturing engineering, procurement, operations, safety, sustainability, and finance/cost review.",
+      "engineering_synthesis_information": "Equipment/system specification sheet, utility matrix, system alternatives, make-or-buy logic, updated facility layout assumptions.",
+      "engineering_synthesis_resource": "Supplier data, equipment catalogues, utility-load calculations, layout tools, capacity models, technical-economic benchmarking templates.",
+      "engineering_evaluation_performance": "Facility concept and equipment/system selection reviewed against process, capacity, safety, sustainability, and utility requirements.",
+      "representative_tools_methods": [
+        "equipment selection",
+        "utility matrix",
+        "make-or-buy analysis",
+        "capacity model",
+        "technical-economic benchmarking"
+      ],
+      "expected_deliverables_tollgates": [
+        "manufacturing system specification",
+        "equipment/technology selection report",
+        "utility matrix",
+        "updated facility layout plan"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "operator/facility requirements"
+        ],
+        "Sustainable": [
+          "utilities and energy"
+        ],
+        "Sensing": [
+          "monitoring infrastructure needs"
+        ],
+        "Smart": [
+          "capacity modelling"
+        ],
+        "Safe": [
+          "equipment/facility safety needs"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Basic Development: Manufacturing System Specification"
+      ],
+      "prompt_priority": "Select manufacturing systems, equipment, utilities, and facility concepts that satisfy process and capacity needs."
+    },
+    {
+      "typology": "Facility Design",
+      "lce_stage": "Advanced Development",
+      "stage_alias_from_book": "Advanced Development | Design",
+      "core_activity": "Design shop-floor layout, capacity, material flow, manufacturing strategy, storage/buffers, human movement, safety zones, utilities, and digital infrastructure.",
+      "engineering_analysis_function": "Develop integrated layout and manufacturing strategy using capacity plans, material-flow logic, station/cell configuration, safety zoning, and simulation evidence.",
+      "engineering_synthesis_organization": "Industrial engineering, facilities, operations, maintenance, safety, IT/OT, logistics, quality, and sustainability teams.",
+      "engineering_synthesis_information": "Detailed layout drawings, capacity analysis, material-flow map, storage/buffer plan, safety-zone plan, utility plan, digital-infrastructure requirements.",
+      "engineering_synthesis_resource": "Layout simulation, DES or capacity tools, CAD/BIM resources, safety assessment tools, logistics data, utility-planning inputs.",
+      "engineering_evaluation_performance": "Layout and capacity design validated through flow, safety, utility, and operational-readiness review.",
+      "representative_tools_methods": [
+        "CAD/BIM layout",
+        "discrete-event simulation",
+        "capacity planning",
+        "material-flow analysis",
+        "safety zoning",
+        "utility planning",
+        "FMEA/HAZOP"
+      ],
+      "expected_deliverables_tollgates": [
+        "detailed layout drawing",
+        "capacity simulation report",
+        "material-flow diagram",
+        "safety-zone plan",
+        "utility plan",
+        "risk assessment"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "human movement paths"
+        ],
+        "Sustainable": [
+          "energy/resource-aware layout"
+        ],
+        "Sensing": [
+          "data-flow requirements"
+        ],
+        "Smart": [
+          "simulation/digital twin"
+        ],
+        "Safe": [
+          "safety zones/risk assessment"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Advanced Development: Manufacturing System Design",
+        "Book ch.6, Ten Core Technologies"
+      ],
+      "prompt_priority": "Design shop-floor layout, capacity, material flow, manufacturing strategy, storage/buffers, human movement, safety zones, utilities, and digital infrastructure."
+    },
+    {
+      "typology": "Facility Design",
+      "lce_stage": "Launching",
+      "stage_alias_from_book": "Launching | Creation/Operation",
+      "core_activity": "Build, install, commission, calibrate, validate, ramp up, and evaluate the facility and manufacturing systems.",
+      "engineering_analysis_function": "Execute construction/build, equipment installation, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.",
+      "engineering_synthesis_organization": "Construction/facilities team, equipment suppliers, commissioning team, operations, maintenance, quality, safety, IT/OT, and training coordinators.",
+      "engineering_synthesis_information": "Installation records, commissioning checklist, site acceptance test report, ramp-up evaluation checklist, training records, safety sign-off, first-article inspection records.",
+      "engineering_synthesis_resource": "Construction resources, installation tools, commissioning protocols, calibration equipment, training materials, MES/SCADA infrastructure, inspection tools.",
+      "engineering_evaluation_performance": "Facility readiness confirmed through commissioning, site acceptance, training, safety sign-off, and human-approved ramp-up decision.",
+      "representative_tools_methods": [
+        "commissioning",
+        "calibration",
+        "site acceptance testing",
+        "operator readiness",
+        "safety sign-off",
+        "MES/SCADA",
+        "first-article inspection"
+      ],
+      "expected_deliverables_tollgates": [
+        "constructed/operational facility",
+        "commissioning records",
+        "site acceptance test report",
+        "ramp-up evaluation checklist",
+        "performance evaluation report"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "operator readiness/training"
+        ],
+        "Sustainable": [
+          "commissioning resource data"
+        ],
+        "Sensing": [
+          "calibrated monitoring infrastructure"
+        ],
+        "Smart": [
+          "MES/SCADA readiness"
+        ],
+        "Safe": [
+          "LOTO/safety sign-off"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, Launching: Facility Construction, Set-up, and Ramp-up of Production"
+      ],
+      "prompt_priority": "Build, install, commission, calibrate, validate, ramp up, and evaluate the facility and manufacturing systems."
+    },
+    {
+      "typology": "Facility Design",
+      "lce_stage": "End-of-Life",
+      "stage_alias_from_book": "End of Life",
+      "core_activity": "Audit facility for reuse, reconfiguration, transformation, decommissioning, asset recovery, reverse logistics, and lessons learned.",
+      "engineering_analysis_function": "Assess reuse, transformation, decommissioning, asset recovery, reverse logistics, environmental impact, and facility adaptability options.",
+      "engineering_synthesis_organization": "Facilities, asset management, sustainability, finance, operations, safety, logistics, and decommissioning/reconfiguration partners.",
+      "engineering_synthesis_information": "Facility audit, asset inventory, reconfiguration options, decommissioning plan, sustainability assessment, reverse-logistics plan, lessons learned.",
+      "engineering_synthesis_resource": "Asset records, maintenance data, facility drawings, environmental records, audit checklists, decommissioning/reconfiguration partners.",
+      "engineering_evaluation_performance": "Reuse, reconfiguration, or decommissioning decision approved with documented asset, safety, and sustainability evidence.",
+      "representative_tools_methods": [
+        "facility audit",
+        "asset inventory",
+        "reconfiguration study",
+        "decommissioning plan",
+        "reverse logistics",
+        "lessons learned"
+      ],
+      "expected_deliverables_tollgates": [
+        "reuse/decommissioning audit report",
+        "asset inventory",
+        "reverse-logistics plan",
+        "reconfiguration option report",
+        "lessons-learned repository"
+      ],
+      "i5s_cues": {
+        "Social": [
+          "community/worker transition"
+        ],
+        "Sustainable": [
+          "asset recovery/reuse"
+        ],
+        "Sensing": [
+          "asset/performance records"
+        ],
+        "Smart": [
+          "reconfiguration protocols"
+        ],
+        "Safe": [
+          "safe decommissioning"
+        ]
+      },
+      "source_basis": [
+        "Book ch.6, End of Life: 5S",
+        "Book ch.2, End-of-life 10R and 5S"
+      ],
+      "prompt_priority": "Audit facility for reuse, reconfiguration, transformation, decommissioning, asset recovery, reverse logistics, and lessons learned."
+    }
+  ]
+}
