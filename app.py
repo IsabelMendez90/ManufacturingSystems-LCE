@@ -781,8 +781,9 @@ objective = st.text_input(
 )
 
 # ------------------------ Industry ------------------------
-# Keep a closed list for convenience, but allow a custom industry when "Other" is selected.
-# The final variable passed to the LLM is `industry`, not the raw selectbox value.
+# IMPORTANT:
+# Use separate widget keys for the dropdown and the custom text.
+# The final value passed to the LLM is `industry`, never the raw value "Other".
 industry_options = ["Automotive", "Electronics", "Medical Devices", "Consumer Goods", "Other"]
 industry_choice = st.selectbox(
     "Industry:",
@@ -792,19 +793,20 @@ industry_choice = st.selectbox(
 )
 st.session_state["industry_idx"] = industry_options.index(industry_choice)
 
+custom_industry_text = ""
 if industry_choice == "Other":
-    custom_industry = st.text_input(
+    custom_industry_text = st.text_input(
         "Please specify the industry:",
-        value=st.session_state.get("custom_industry", ""),
-        key="custom_industry",
+        key="custom_industry_text",
         placeholder="e.g., Precision component manufacturing, aerospace, semiconductors, food processing"
-    )
-    industry = custom_industry.strip() if custom_industry.strip() else "Other"
+    ).strip()
+    industry = custom_industry_text
 else:
     industry = industry_choice
 
 # ------------------------ Role ------------------------
-# Same logic for role: the LLM receives `role_selected`, which may be a custom role.
+# Same logic for role. The final value passed to the LLM is `role_selected`,
+# never the raw value "Other".
 role_options = [
     "Design Engineer",
     "Process Engineer",
@@ -823,18 +825,31 @@ role_choice = st.selectbox(
 )
 st.session_state["role_idx"] = role_options.index(role_choice)
 
+custom_role_text = ""
 if role_choice == "Other":
-    custom_role = st.text_input(
+    custom_role_text = st.text_input(
         "Please specify your role:",
-        value=st.session_state.get("custom_role", ""),
-        key="custom_role",
-        placeholder="e.g., Manufacturing systems consultant, plant manager, quality engineer"
-    )
-    role_selected = custom_role.strip() if custom_role.strip() else "Other"
+        key="custom_role_text",
+        placeholder="e.g., Manufacturing systems engineer, plant manager, quality engineer"
+    ).strip()
+    role_selected = custom_role_text
 else:
     role_selected = role_choice
 
-st.caption(f"Scenario context used by the model: **{industry}** industry | **{role_selected}** role")
+missing_custom_industry = (industry_choice == "Other" and not custom_industry_text)
+missing_custom_role = (role_choice == "Other" and not custom_role_text)
+
+if missing_custom_industry:
+    st.warning("Please write the custom industry. The model cannot use only 'Other' as context.")
+if missing_custom_role:
+    st.warning("Please write the custom role. The model cannot use only 'Other' as context.")
+
+industry_for_display = industry if industry else "not specified"
+role_for_display = role_selected if role_selected else "not specified"
+st.caption(
+    f"Scenario context used by the model: **{industry_for_display}** industry | "
+    f"**{role_for_display}** role"
+)
 
 # 2) Manufacturing System Type
 st.header("2. Select Manufacturing System Type")
@@ -887,17 +902,9 @@ if uploads:
 enable_agent = True
 auto_iterate = True
 
-if st.button("Generate Plan & Recommendations"):
-    # Guardrails for custom values. These fields are injected into the LLM prompt,
-    # so they should not remain as a generic "Other" label.
-    if industry_choice == "Other" and industry == "Other":
-        st.error("Please specify the industry before generating the plan.")
-        st.stop()
+can_generate = not missing_custom_industry and not missing_custom_role
 
-    if role_choice == "Other" and role_selected == "Other":
-        st.error("Please specify the role before generating the plan.")
-        st.stop()
-
+if st.button("Generate Plan & Recommendations", disabled=not can_generate):
     with st.spinner("Agent planning, executing tools, stage views, and refining..."):
         cache_key = _cache_key(
             objective, system_type, industry, role_selected,
@@ -906,6 +913,7 @@ if st.button("Generate Plan & Recommendations"):
         st.session_state["current_cache_key"] = cache_key
         if "plan_cache" not in st.session_state:
             st.session_state["plan_cache"] = {}
+
         if cache_key in st.session_state["plan_cache"]:
             result = st.session_state["plan_cache"][cache_key]
         else:
@@ -922,6 +930,17 @@ if st.button("Generate Plan & Recommendations"):
                 max_steps=3,
             )
             st.session_state["plan_cache"][cache_key] = result
+
+        # Store the exact scenario used to create this result.
+        # This avoids mismatch if the user changes the UI after generating.
+        result["scenario_context"] = {
+            "objective": objective,
+            "system_type": system_type,
+            "industry": industry,
+            "role": role_selected,
+            "selected_stages": selected_stages,
+            "five_s_levels": five_s_levels,
+        }
         st.session_state["agent_result"] = result
 
 # ------------------------ Results ------------------------
