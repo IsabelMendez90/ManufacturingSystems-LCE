@@ -15,7 +15,7 @@ import json, re
 import hashlib
 import math
 import random
-from manufacturing_knowledge_base import KNOWLEDGE_BASE_ID, KNOWLEDGE_BASE_VERSION, build_kb_evidence
+from manufacturing_knowledge_base import KNOWLEDGE_BASE_ID, KNOWLEDGE_BASE_VERSION, build_kb_evidence, get_kb_entries
 
 # ------------------------ App + API setup ------------------------
 st.set_page_config(page_title="LCE + 5S", layout="wide")
@@ -62,7 +62,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v12_kb_facility_strict__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v13_kb_enriched_raw_plan__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -304,6 +304,90 @@ def parse_section(text, head):
 
 
 
+def replace_section(text: str, head: str, new_body: str) -> str:
+    """Replace a bracketed markdown section while preserving the rest of the LLM output."""
+    if not text:
+        return f"[{head}]\n{new_body}".strip()
+    header_any = re.compile(r"^\s*(?:#+\s*)?(?:\*\*)?\[([^\]]+)\](?:\*\*)?\s*$", re.MULTILINE)
+    matches = list(header_any.finditer(text))
+    target = head.strip().lower()
+    for i, m in enumerate(matches):
+        if m.group(1).strip().lower() == target:
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            return text[:start] + "\n" + (new_body or "").strip() + "\n" + text[end:]
+    return text.rstrip() + f"\n\n[{head}]\n" + (new_body or "").strip()
+
+
+def _selected_stage_name(action: str) -> str:
+    return action.split(":", 1)[0].strip()
+
+
+def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str:
+    """Build a detailed action-plan section from the frozen curated knowledge base.
+
+    This repair/enrichment layer is only used when the LLM response becomes too
+    generic. It keeps the raw plan aligned with the same frozen knowledge base used
+    for Stage Views and avoids one-line deliverable-only outputs.
+    """
+    lines = []
+    for action in selected_stages or []:
+        stage = _selected_stage_name(action)
+        entries = get_kb_entries(typology=system_type, lce_stage=stage)
+        if not entries:
+            continue
+        e = entries[0]
+        tools = ", ".join((e.get("representative_tools_methods") or [])[:4])
+        deliverables = ", ".join((e.get("expected_deliverables_tollgates") or [])[:4])
+        analysis = e.get("engineering_analysis_function") or e.get("core_activity") or ""
+        information = e.get("engineering_synthesis_information") or ""
+        evaluation = e.get("engineering_evaluation_performance") or ""
+        if system_type == "Facility Design":
+            line = (
+                f"{stage}: {analysis} Use {information.lower()} "
+                f"with representative methods such as {tools}. "
+                f"Deliverable/tollgate: {deliverables}. Evaluation: {evaluation}"
+            )
+        else:
+            line = (
+                f"{stage}: {analysis} Deliverable/tollgate: {deliverables}. "
+                f"Representative methods: {tools}. Evaluation: {evaluation}"
+            )
+        line = re.sub(r"\s+", " ", line).strip()
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
+    """Detect when the Facility Design raw plan collapses into generic deliverable-only lines."""
+    sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan") or ""
+    if not sc.strip():
+        return True
+    facility_terms = [
+        "capacity", "utility", "utilities", "material-flow", "material flow",
+        "storage", "buffer", "human movement", "safety zone", "safety zones",
+        "commissioning", "site acceptance", "operator readiness", "ramp-up",
+        "reuse", "transformation", "asset recovery", "reverse logistics",
+        "facility adaptability", "lessons learned", "layout", "decommissioning",
+    ]
+    hits = sum(1 for term in facility_terms if term.lower() in sc.lower())
+    stage_lines = [ln for ln in sc.splitlines() if re.match(r"^\s*(Ideation|Basic Development|Advanced Development|Launching|End[-‑]of[-‑]Life)\s*:", ln, flags=re.IGNORECASE)]
+    avg_len = sum(len(ln) for ln in stage_lines) / max(1, len(stage_lines))
+    return hits < 8 or (len(stage_lines) >= 4 and avg_len < 135)
+
+
+def enrich_raw_plan_from_kb_if_needed(plan_text: str, system_type: str, selected_stages: list) -> str:
+    """Repair overly generic Facility Design raw plan sections using the frozen curated KB."""
+    if system_type != "Facility Design":
+        return plan_text
+    if not _facility_raw_plan_is_too_generic(plan_text):
+        return plan_text
+    detailed = build_kb_action_plan_section(system_type, selected_stages)
+    if not detailed:
+        return plan_text
+    return replace_section(plan_text, "Supply Chain Configuration & Action Plan", detailed)
+
+
 def clean_internal_verifier_leaks(plan_text: str) -> str:
     """Remove accidental leakage of internal verifier/debug feedback from final user-facing output.
 
@@ -384,6 +468,16 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
+
+    # Remove maturity-transition notation from narrative sections.
+    # Levels should appear only in [Expected 5S Maturity] and the final rationale table.
+    maturity_transition_patterns = [
+        r"\s*\(\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to|–|-|—)\s*L(?:evel)?\s*[0-4]\s*\)",
+        r"\s*\(\s*Level\s*[0-4]\s*(?:→|->|to|–|-|—)\s*Level\s*[0-4]\s*\)",
+        r"\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to)\s*L(?:evel)?\s*[0-4]",
+    ]
+    for pat in maturity_transition_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
 
     # Normalize accidental 5S dimension labels. The construct uses "Safe", not "Safety".
     # Keep "safety" as a normal noun inside sentences, but correct label-like uses.
@@ -469,6 +563,10 @@ def clean_unprovided_specifics(plan_text: str) -> str:
     ]
     for pat, repl in sustainability_target_patterns:
         cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
+    # Remove maturity-transition notation that occasionally leaks into narrative recommendations.
+    cleaned = re.sub(r"\s*\(\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to|–|-|—)\s*L(?:evel)?\s*[0-4]\s*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*L(?:evel)?\s*[0-4]\s*(?:→|->|to)\s*L(?:evel)?\s*[0-4]", "", cleaned, flags=re.IGNORECASE)
 
     # Clarify that human review is a governance control, not a risk by itself.
     governance_risk_patterns = [
@@ -1191,6 +1289,7 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- The final plan must read as a manufacturing recommendation, not as a self-correction or debugging report.\n"
         "- Do not mention internal maturity labels such as 'L1 alignment', 'Level 1 alignment', or similar inside the action plan.\n"
         "- Use maturity levels only in the [Expected 5S Maturity] section.\n"
+        "- Do not write maturity-transition notation such as '(L1→L2)', 'L1->L2', 'Level 1 to Level 2', or similar in the action plan, risks, or Digital/AI sections.\n"
         "- In [Expected 5S Maturity], if a dimension has at least one concrete improvement action in the plan, set its expected level to current level + 1, with a maximum one-level increase unless measured, simulated, or uploaded evidence is provided.\n"
         "- If a dimension has no concrete improvement action, keep its expected level equal to the current level.\n"
         "- Avoid saying that a current maturity level 'lacks' a standard if that standard appears in the maturity taxonomy. Frame risks as implementation gaps instead.\n"
@@ -1209,6 +1308,7 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- For Facility Design Launching, prioritize build/install, commissioning, calibration, site acceptance testing, operator readiness, safety sign-off, and ramp-up evaluation.\n"
         "- For Facility Design End-of-Life, prioritize reuse, transformation, decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned.\n"
         "- For Facility Design, do not reduce the output to generic one-line deliverables such as only 'detailed layout drawing' or only 'reuse/decommissioning audit report'. Each stage must include the relevant facility-centred elements from the frozen knowledge base.\n"
+        "- For Facility Design raw action-plan lines, each selected LCE stage should include a facility-centred action, the key information or method used, and the deliverable/tollgate. Avoid very short deliverable-only sentences.\n"
         "- For Facility Design Advanced Development, explicitly mention at least four of the following when relevant: capacity model, material-flow logic, storage/buffer areas, human movement paths, safety zones, utility routing, manufacturing strategy, CAD/BIM layout, DES/layout simulation.\n"
         "- For Facility Design Launching, explicitly mention commissioning, site acceptance testing, calibration, operator readiness, safety sign-off, and ramp-up evaluation where relevant.\n"
         "- For Facility Design End-of-Life, explicitly mention reuse, transformation or decommissioning, asset recovery, reverse logistics, facility adaptability, and lessons learned where relevant.\n"
@@ -1367,6 +1467,8 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
     # Final safety pass: remove verifier/debug leakage and unsupported specifics before rendering results.
     plan_text = clean_internal_verifier_leaks(plan_text)
     plan_text = clean_unprovided_specifics(plan_text)
+    plan_text = enrich_raw_plan_from_kb_if_needed(plan_text, system_type, selected_stages)
+    plan_text = clean_internal_verifier_leaks(clean_unprovided_specifics(plan_text))
 
     # Stage Views pass
     context_block = build_context_block(
