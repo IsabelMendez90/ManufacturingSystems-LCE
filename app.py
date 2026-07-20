@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v18_tt_rationales_and_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v19_i5s_labels_tt_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -438,38 +438,109 @@ def _strip_markdown_labeling(line: str) -> str:
     return line.strip()
 
 
+def _clean_i5s_narrative_line(line: str) -> str:
+    """Normalise phrasing in narrative I5S sections without changing evidence meaning."""
+    line = _strip_markdown_labeling(line)
+    line = re.sub(r"\bto raise human[-\s]?factors maturity\b", "to strengthen human-factors integration", line, flags=re.IGNORECASE)
+    line = re.sub(r"\bgoverned by human approval of sustainability criteria\b", "subject to human review of sustainability criteria", line, flags=re.IGNORECASE)
+    line = re.sub(r"risk:\s*human[-\s]?review delay could postpone deployment", "risk: deployment may be delayed if safety-review evidence is incomplete", line, flags=re.IGNORECASE)
+    line = re.sub(r"risk if smart tools are used with human review and approval leading to uncontrolled changes", "risk if smart tools are used without human review and approval, leading to uncontrolled changes", line, flags=re.IGNORECASE)
+    line = re.sub(r"risk:\s*human review required", "risk: incomplete validation evidence may delay approval", line, flags=re.IGNORECASE)
+    line = re.sub(r"\bhuman[-\s]?review delay\b", "incomplete validation evidence", line, flags=re.IGNORECASE)
+    line = re.sub(r"\brisk is human review\b", "risk is incomplete validation evidence", line, flags=re.IGNORECASE)
+    line = re.sub(r"\s+", " ", line).strip()
+    return line
+
+
+def _split_opportunity_risk_pairs(lines: list) -> list:
+    """Turn unlabeled Opportunity/Risk lines into ordered pairs for Social..Safe."""
+    pairs = []
+    pending_opp = None
+    for line in lines:
+        m_opp = re.match(r"^Opportunity\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        m_risk = re.match(r"^Risk\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if m_opp:
+            if pending_opp is not None:
+                pairs.append((pending_opp, ""))
+            pending_opp = m_opp.group(1).strip()
+        elif m_risk:
+            risk = m_risk.group(1).strip()
+            if pending_opp is None:
+                pairs.append(("", risk))
+            else:
+                pairs.append((pending_opp, risk))
+                pending_opp = None
+        else:
+            if pending_opp is not None:
+                pending_opp = (pending_opp + " " + line).strip()
+    if pending_opp is not None:
+        pairs.append((pending_opp, ""))
+    return pairs
+
+
 def normalize_i5s_order(section_text: str) -> str:
-    """Keep I5S narrative sections in the canonical order and remove markdown clutter."""
+    """Keep I5S narrative sections in canonical order and preserve explicit labels.
+
+    The LLM sometimes returns five unlabeled Opportunity/Risk pairs. For benchmark
+    readability, this function assigns those pairs to the canonical I5S order:
+    Social, Sustainable, Sensing, Smart, Safe. This is formatting only; it does
+    not add new evidence beyond the returned pair text.
+    """
     if not section_text:
         return ""
     order = ["Social", "Sustainable", "Sensing", "Smart", "Safe"]
     buckets = {dim: [] for dim in order}
     extras = []
+    clean_lines = []
+
     for raw in section_text.splitlines():
-        line = _strip_markdown_labeling(raw)
-        if not line:
-            continue
-        line = re.sub(r"\bto raise human[-\s]?factors maturity\b", "to strengthen human-factors integration", line, flags=re.IGNORECASE)
-        line = re.sub(r"\bgoverned by human approval of sustainability criteria\b", "subject to human review of sustainability criteria", line, flags=re.IGNORECASE)
-        line = re.sub(r"risk:\s*human[-\s]?review delay could postpone deployment", "risk: deployment may be delayed if safety-review evidence is incomplete", line, flags=re.IGNORECASE)
-        line = re.sub(r"risk if smart tools are used with human review and approval leading to uncontrolled changes", "risk if smart tools are used without human review and approval, leading to uncontrolled changes", line, flags=re.IGNORECASE)
-        line = re.sub(r"risk:\s*human review required", "risk: incomplete validation evidence may delay approval", line, flags=re.IGNORECASE)
+        line = _clean_i5s_narrative_line(raw)
+        if line:
+            clean_lines.append(line)
+
+    has_dim_labels = any(re.match(r"^(Social|Sustainable|Sensing|Smart|Safe)\s*:", ln, flags=re.IGNORECASE) for ln in clean_lines)
+    has_unlabeled_pairs = (not has_dim_labels) and sum(1 for ln in clean_lines if re.match(r"^Opportunity\s*:", ln, flags=re.IGNORECASE)) >= 5
+
+    if has_unlabeled_pairs:
+        pairs = _split_opportunity_risk_pairs(clean_lines)
+        out = []
+        for dim, pair in zip(order, pairs[:5]):
+            opp, risk = pair
+            block = [f"{dim}:"]
+            if opp:
+                block.append(f"  Opportunity: {opp}")
+            if risk:
+                block.append(f"  Risk: {risk}")
+            out.append("\n".join(block))
+        if len(pairs) < 5:
+            for dim in order[len(pairs):]:
+                out.append(f"{dim}: Not specified.")
+        return "\n\n".join(out).strip()
+
+    for line in clean_lines:
         m = re.match(r"^(Social|Sustainable|Sensing|Smart|Safe)\s*:\s*(.*)$", line, flags=re.IGNORECASE)
         if m:
             dim = next(d for d in order if d.lower() == m.group(1).lower())
             body = m.group(2).strip()
             if body:
+                # Keep explicit Opportunity/Risk phrases readable under each dimension.
+                body = re.sub(r"\bRisk\s*:", "\n  Risk:", body, flags=re.IGNORECASE)
+                body = re.sub(r"\bOpportunity\s*:", "\n  Opportunity:", body, flags=re.IGNORECASE)
+                body = body.strip()
+                if not body.startswith(("Opportunity:", "Risk:", "  ")):
+                    body = "Opportunity: " + body if "risk:" not in body.lower() else body
+                body = re.sub(r"(?m)^(Opportunity|Risk):", r"  \1:", body)
                 buckets[dim].append(body)
         else:
             extras.append(line)
+
     out = []
     for dim in order:
         if buckets[dim]:
-            body = " ".join(buckets[dim])
-            body = re.sub(r"\s+", " ", body).strip()
-            out.append(f"{dim}: {body}")
+            body = "\n".join(buckets[dim]).strip()
+            out.append(f"{dim}:\n{body}")
     out.extend(extras)
-    return "\n".join(out).strip()
+    return "\n\n".join(out).strip()
 
 
 def normalize_supply_chain_raw_format(section_text: str, selected_stages: list) -> str:
@@ -1246,7 +1317,7 @@ def _pick_reasons(plan_text: str, dim: str) -> list:
             ([r"cross[-\s]?functional", r"operator[-\s]?led", r"SOP refinement", r"participatory"],
              "Cross-functional review sessions and operator-led SOP refinement support human-centred technology transfer."),
             ([r"ergonom", r"human[-\s]?factors?", r"human movement"],
-             "Ergonomic assessments and human movement paths support safer, more human-centred layout design."),
+             "Ergonomic assessments and human-factor actions support safer, more human-centred work design."),
             ([r"training", r"LMS", r"workforce", r"operator"],
              "Workforce training actions support skill development and more consistent shop-floor practice."),
             ([r"co[-\s]?creation", r"worker feedback", r"collaborative"],
@@ -1479,7 +1550,7 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- Scope: manufacturing system typology, LCE stages, 5S (Social, Sustainable, Sensing, Smart, Safe), with supply chain & Industry 5.0.\n"
         "- Use the exact Industry 5.0 5S labels: Social, Sustainable, Sensing, Smart, and Safe.\n"
         "- Do not use Safety as a 5S dimension label; use Safe. You may use safety as a normal noun only inside sentences.\n"
-        "- In [Improvement Opportunities & Risks], organize I5S items using Safe, not Safety.\n"
+        "- In [Improvement Opportunities & Risks], organize I5S items with explicit labels in this exact order: Social, Sustainable, Sensing, Smart, Safe. Use Safe, not Safety.\n"
         "- Never invent data; use the evidence only.\n"
         "- Do not describe AI as automatically updating SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records.\n"
         "- AI may recommend updates, but all changes to SOPs, control plans, MES/ERP records, equipment parameters, supplier status, production settings, or operational records must require human review and approval.\n"
@@ -1508,7 +1579,8 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- For Technology Transfer, any AI or digital-twin recommendation must be reviewed by engineers before changing SOPs, control plans, equipment parameters, MES/ERP records, or operational settings.\n"
         "- For Technology Transfer raw action-plan lines, use the same detailed format for every LCE stage: Action, Key information/methods, Representative methods/tools, Deliverables/tollgates, and Evaluation.\n"
         "- For Technology Transfer Safe actions, explicitly include risk reviews, FMEA/HAZOP or LOTO planning, commissioning safety checks, and incomplete validation evidence as the risk, rather than treating human review as a delay.\n"
-        "- For Technology Transfer Social actions, explicitly connect cross-functional review sessions, operator-led SOP refinement, and training to human-centred technology transfer.\n"
+        "- Do not output unlabeled Opportunity/Risk pairs. Every Opportunity/Risk item must appear under one I5S label: Social, Sustainable, Sensing, Smart, or Safe.\n"
+        "- For Technology Transfer Social actions, explicitly connect cross-functional review sessions, operator-led SOP refinement, ergonomic checklists, and training to human-centred technology transfer and equipment ramp-up, not facility layout design.\n"
         "- For Facility Design, the main logic must be facility-centred: product/process requirements, demand and capacity assumptions, equipment/system selection, utilities, shop-floor layout, material flow, storage and buffer areas, human movement, safety zones, installation, commissioning, site acceptance, ramp-up evaluation, and future reconfiguration.\n"
         "- For Facility Design, make-or-buy analysis and supplier networks are supporting decisions; they must not replace the facility requirements brief, capacity model, layout, material-flow plan, or commissioning logic.\n"
         "- For Facility Design, cyber-by-design, sensing infrastructure, digital traceability, and AI analytics are supporting elements; they must not become the main Advanced Development activity.\n"

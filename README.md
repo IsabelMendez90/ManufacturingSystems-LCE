@@ -88,3 +88,10 @@ The raw Supply Chain Configuration & Action Plan is rendered with preserved line
 - Social rationales distinguish human-centred technology transfer, ergonomic layout design, and workforce training instead of over-linking human movement paths to skill development.
 - Expected 5S rationale polishing cannot reduce the number of deterministic evidence-grounded reasons when two reasons are available.
 - Raw stage formatting and I5S order normalisation from v17 are retained.
+
+## v19 Technology Transfer I5S formatting update
+
+- Improvement Opportunities & Risks now preserves explicit I5S labels in the canonical order: Social, Sustainable, Sensing, Smart, Safe.
+- If the LLM returns five unlabeled Opportunity/Risk pairs, the app formats them under the five I5S labels instead of leaving them as repeated unlabeled lines.
+- Technology Transfer Social rationale now uses human-centred work design, SOP development, equipment ramp-up, and operator training language, avoiding Facility Design-specific “layout design” wording when the scenario is Technology Transfer.
+- Raw action-plan indentation and stage separation are retained for benchmark-ready copied text.

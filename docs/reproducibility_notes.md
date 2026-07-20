@@ -25,3 +25,7 @@ Secrets are intentionally not included in the repository package. Configure `OPE
 ## v15 safeguards
 
 Facility Design raw action-plan sections are rebuilt from the frozen knowledge base to avoid generic deliverable-only lines. Narrative sections are cleaned to remove maturity-level explanations (`current L1`, `L1 lacks`, `L1 uses`, `(L1→L2)`) unprovided target-achievement phrases (`targets met`, `target rate`, `asset recovery targets met`), double-period punctuation artifacts, and ambiguous immutable-chain traceability phrasing.
+
+## v19 formatting note
+
+The v19 package adds a final formatting pass for I5S narrative sections. The canonical order is Social, Sustainable, Sensing, Smart, Safe. Unlabeled Opportunity/Risk pairs are assigned to this canonical order only when the generated section contains no explicit I5S labels and returns five Opportunity/Risk pairs. This is a display/export clean-up step and does not add new manufacturing evidence.
