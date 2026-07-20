@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v19_i5s_labels_tt_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v20_strict_i5s_and_raw_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -384,13 +384,14 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
             f"  Deliverables/tollgates: {deliverables}.\n"
             f"  Evaluation: {evaluation}."
         )
-        # Clean spaces inside lines while preserving useful indentation and line breaks.
+        # Clean spaces inside lines while preserving a strict, export-friendly
+        # two-space indentation for the five raw-plan fields.
         normalized_lines = []
         for ln in line.splitlines():
-            ln = re.sub(r"[ \t]+", " ", ln).rstrip()
-            if re.match(r"^(Action|Key information/methods|Representative methods/tools|Deliverables/tollgates|Evaluation):", ln):
-                ln = "  " + ln
-            normalized_lines.append(ln)
+            stripped = re.sub(r"[ \t]+", " ", ln).strip()
+            if re.match(r"^(Action|Key information/methods|Representative methods/tools|Deliverables/tollgates|Evaluation):", stripped):
+                stripped = "  " + stripped
+            normalized_lines.append(stripped)
         line = "\n".join(normalized_lines)
         line = re.sub(r"\.\.", ".", line).strip()
         lines.append(line)
@@ -476,6 +477,102 @@ def _split_opportunity_risk_pairs(lines: list) -> list:
     if pending_opp is not None:
         pairs.append((pending_opp, ""))
     return pairs
+
+
+def build_canonical_i5s_improvement_section(system_type: str) -> str:
+    """Deterministic I5S repair section used only when the LLM returns unlabeled
+    Opportunity/Risk pairs. It preserves the benchmark-readable order and keeps
+    human review as governance rather than as a risk source.
+    """
+    templates = {
+        "Technology Transfer": {
+            "Social": (
+                "Cross-functional review sessions, operator-led SOP refinement, ergonomic checklists, and LMS-based operator training support human-centred technology transfer and equipment ramp-up.",
+                "Insufficient operator participation may reduce adoption; mitigate through participatory co-creation and governance review."
+            ),
+            "Sustainable": (
+                "Material selection through data sheets, resource-efficiency benchmarking, energy/process monitoring, and reuse/recycling planning improve lifecycle sustainability.",
+                "Limited lifecycle records or spreadsheet-only tracking may reduce sustainability visibility; mitigate through structured lifecycle records and auditable traceability."
+            ),
+            "Sensing": (
+                "IIoT condition monitoring, calibrated DAQ, and SCADA/OPC-UA data collection enhance equipment monitoring and process visibility.",
+                "Limited integration of thermocouples, limit switches, or legacy signals may reduce early defect detection; mitigate through structured data-collection logic."
+            ),
+            "Smart": (
+                "Digital-twin simulation, predictive maintenance, and MES/ERP data collection support technology-transfer decision support and lifecycle learning.",
+                "Limited PLC/MES integration may constrain optimization; AI outputs must remain decision support and require engineer review before operational changes."
+            ),
+            "Safe": (
+                "FMEA/HAZOP, LOTO planning, and commissioning safety checks support safe technology selection, equipment ramp-up, and decommissioning.",
+                "Incomplete validation evidence during installation qualification may require rework before safe operation approval."
+            ),
+        },
+        "Facility Design": {
+            "Social": (
+                "Participatory layout reviews, ergonomic assessment, human movement paths, and operator training support human-centred facility design.",
+                "Limited operator participation may delay identification of human-factor issues during commissioning and ramp-up."
+            ),
+            "Sustainable": (
+                "Energy/resource-aware layout, utility planning, sustainability criteria, and asset-recovery planning support lifecycle sustainability.",
+                "Missing utility or resource monitoring may limit environmental decision-making during facility operation."
+            ),
+            "Sensing": (
+                "SCADA/DAQ, calibrated sensors, condition monitoring, and data-flow requirements improve process and facility observability.",
+                "Insufficient sensing coverage may reduce visibility of equipment condition, utility use, or process readiness."
+            ),
+            "Smart": (
+                "Digital twins, capacity modelling, DES, MES/SCADA readiness, and scenario planning support smarter layout and ramp-up decisions.",
+                "Smart tools may lead to uncontrolled changes if outputs are used without human review, validation, and change control."
+            ),
+            "Safe": (
+                "Safety zones, FMEA/HAZOP, LOTO, ISO 45001 practices, and commissioning safety sign-off support formal risk control.",
+                "Incomplete safety lifecycle documentation may delay commissioning sign-off and facility readiness approval."
+            ),
+        },
+        "Product Transfer": {
+            "Social": (
+                "Workforce training, assembly-readiness checks, and operator feedback support human-centred product transfer.",
+                "Insufficient workforce preparation may reduce launch readiness and quality consistency."
+            ),
+            "Sustainable": (
+                "Disassembly, recycling, reuse, reverse logistics, and lifecycle documentation support circular product-transfer decisions.",
+                "Missing lifecycle records may reduce end-of-life traceability and recovery planning."
+            ),
+            "Sensing": (
+                "Traceability logs, inspection evidence, and quality-control data support product and supplier visibility.",
+                "Insufficient data capture may reduce defect detection and supplier-performance learning."
+            ),
+            "Smart": (
+                "Digital traceability, supplier scoring, and planning analytics support product-transfer decision support.",
+                "Unvalidated analytics may create poor sourcing or ramp-up decisions if not reviewed by engineers."
+            ),
+            "Safe": (
+                "Acceptance criteria, FMEA/HAZOP where relevant, LOTO, and launch safety checks support safe transfer and assembly readiness.",
+                "Incomplete launch-safety evidence may delay ramp-up approval."
+            ),
+        },
+    }
+    data = templates.get(system_type, templates["Product Transfer"])
+    blocks = []
+    for dim in ["Social", "Sustainable", "Sensing", "Smart", "Safe"]:
+        opp, risk = data[dim]
+        blocks.append(f"{dim}:\n  Opportunity: {opp}\n  Risk: {risk}")
+    return "\n\n".join(blocks)
+
+
+def ensure_canonical_i5s_improvement_section(plan_text: str, system_type: str) -> str:
+    """Final guard: Improvement Opportunities must display explicit I5S labels.
+    If normalisation still leaves generic Opportunity/Risk pairs, replace them with
+    a deterministic, typology-specific section.
+    """
+    body = parse_section(plan_text, "Improvement Opportunities & Risks")
+    if not body:
+        return plan_text
+    normalised = normalize_i5s_order(body)
+    dim_count = len(re.findall(r"(?im)^\s*(Social|Sustainable|Sensing|Smart|Safe)\s*:", normalised))
+    if dim_count < 5:
+        normalised = build_canonical_i5s_improvement_section(system_type)
+    return replace_section(plan_text, "Improvement Opportunities & Risks", normalised)
 
 
 def normalize_i5s_order(section_text: str) -> str:
@@ -585,10 +682,19 @@ def normalize_raw_sections_for_display(plan_text: str, system_type: str, selecte
             "Supply Chain Configuration & Action Plan",
             normalize_supply_chain_raw_format(sc, selected_stages),
         )
-    for head in ["Improvement Opportunities & Risks", "Digital/AI Next Steps"]:
-        body = parse_section(plan_text, head)
-        if body:
-            plan_text = replace_section(plan_text, head, normalize_i5s_order(body))
+    # Improvement Opportunities must keep explicit I5S labels in canonical order.
+    body = parse_section(plan_text, "Improvement Opportunities & Risks")
+    if body:
+        plan_text = replace_section(plan_text, "Improvement Opportunities & Risks", normalize_i5s_order(body))
+        plan_text = ensure_canonical_i5s_improvement_section(plan_text, system_type)
+
+    # Digital/AI Next Steps is not an I5S table; only remove bullets/markdown while
+    # preserving the generated steps.
+    body = parse_section(plan_text, "Digital/AI Next Steps")
+    if body:
+        cleaned_digital = "\n".join(_strip_markdown_labeling(ln) for ln in body.splitlines() if _strip_markdown_labeling(ln))
+        cleaned_digital = re.sub(r"\n{3,}", "\n\n", cleaned_digital).strip()
+        plan_text = replace_section(plan_text, "Digital/AI Next Steps", cleaned_digital)
     return plan_text
 
 
@@ -1753,6 +1859,9 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
     plan_text = clean_internal_verifier_leaks(clean_unprovided_specifics(plan_text))
     plan_text = normalize_raw_sections_for_display(plan_text, system_type, selected_stages)
     plan_text = clean_internal_verifier_leaks(clean_unprovided_specifics(plan_text))
+    # Final formatting must occur after final text-cleaning so indentation and
+    # canonical I5S labels cannot be removed by safety substitutions.
+    plan_text = normalize_raw_sections_for_display(plan_text, system_type, selected_stages)
 
     # Stage Views pass
     context_block = build_context_block(

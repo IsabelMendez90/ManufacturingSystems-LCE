@@ -95,3 +95,10 @@ The raw Supply Chain Configuration & Action Plan is rendered with preserved line
 - If the LLM returns five unlabeled Opportunity/Risk pairs, the app formats them under the five I5S labels instead of leaving them as repeated unlabeled lines.
 - Technology Transfer Social rationale now uses human-centred work design, SOP development, equipment ramp-up, and operator training language, avoiding Facility Design-specific “layout design” wording when the scenario is Technology Transfer.
 - Raw action-plan indentation and stage separation are retained for benchmark-ready copied text.
+
+## v20 strict formatting guard
+
+- Adds a final post-cleaning formatting pass so the raw action-plan stage blocks keep consistent two-space indentation after all safety substitutions.
+- Adds a deterministic guard for `Improvement Opportunities & Risks`: if the LLM returns unlabeled `Opportunity/Risk` pairs, the app replaces them with a typology-specific I5S section labelled `Social`, `Sustainable`, `Sensing`, `Smart`, and `Safe`.
+- Keeps `Digital/AI Next Steps` as a plain action list instead of forcing I5S labels onto that section.
+- Updates the cache revision so deployed Streamlit results are regenerated rather than reusing previous v19 cached outputs.
