@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v20_strict_i5s_and_raw_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v21_deterministic_all_typologies_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -418,12 +418,12 @@ def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
 def enrich_raw_plan_from_kb_if_needed(plan_text: str, system_type: str, selected_stages: list) -> str:
     """Repair the raw action-plan section using the frozen KB when needed.
 
-    Facility Design and Technology Transfer are rewritten with a KB-grounded
+    Facility Design, Technology Transfer, and Product Transfer are rewritten with a KB-grounded
     action-plan section so the raw plan remains as detailed as the Stage Views.
     This avoids short generic lines such as only "detailed layout drawing",
     "equipment shortlist", or "pilot-validation package".
     """
-    if system_type not in {"Facility Design", "Technology Transfer"}:
+    if system_type not in {"Facility Design", "Technology Transfer", "Product Transfer"}:
         return plan_text
     detailed = build_kb_action_plan_section(system_type, selected_stages)
     if not detailed:
@@ -677,16 +677,26 @@ def normalize_raw_sections_for_display(plan_text: str, system_type: str, selecte
         return ""
     sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan")
     if sc:
+        # v21: for all three benchmark typologies, rebuild the visible/exported
+        # raw action plan from the frozen KB instead of relying on LLM spacing.
+        # This guarantees uniform stage blocks and field indentation.
+        kb_sc = build_kb_action_plan_section(system_type, selected_stages)
+        final_sc = kb_sc if kb_sc else normalize_supply_chain_raw_format(sc, selected_stages)
         plan_text = replace_section(
             plan_text,
             "Supply Chain Configuration & Action Plan",
-            normalize_supply_chain_raw_format(sc, selected_stages),
+            final_sc,
         )
-    # Improvement Opportunities must keep explicit I5S labels in canonical order.
+    # v21: Improvement Opportunities are rendered deterministically in canonical
+    # I5S order for all benchmark typologies. This prevents unlabeled
+    # Opportunity/Risk pairs and inconsistent indentation after LLM cleanup.
     body = parse_section(plan_text, "Improvement Opportunities & Risks")
     if body:
-        plan_text = replace_section(plan_text, "Improvement Opportunities & Risks", normalize_i5s_order(body))
-        plan_text = ensure_canonical_i5s_improvement_section(plan_text, system_type)
+        plan_text = replace_section(
+            plan_text,
+            "Improvement Opportunities & Risks",
+            build_canonical_i5s_improvement_section(system_type),
+        )
 
     # Digital/AI Next Steps is not an I5S table; only remove bullets/markdown while
     # preserving the generated steps.
@@ -1421,7 +1431,7 @@ def _pick_reasons(plan_text: str, dim: str) -> list:
     rules = {
         "Social": [
             ([r"cross[-\s]?functional", r"operator[-\s]?led", r"SOP refinement", r"participatory"],
-             "Cross-functional review sessions and operator-led SOP refinement support human-centred technology transfer."),
+             "Cross-functional review sessions and operator-led SOP refinement support human-centred transfer and ramp-up."),
             ([r"ergonom", r"human[-\s]?factors?", r"human movement"],
              "Ergonomic assessments and human-factor actions support safer, more human-centred work design."),
             ([r"training", r"LMS", r"workforce", r"operator"],

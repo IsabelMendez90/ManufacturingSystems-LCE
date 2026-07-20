@@ -29,3 +29,7 @@ Facility Design raw action-plan sections are rebuilt from the frozen knowledge b
 ## v19 formatting note
 
 The v19 package adds a final formatting pass for I5S narrative sections. The canonical order is Social, Sustainable, Sensing, Smart, Safe. Unlabeled Opportunity/Risk pairs are assigned to this canonical order only when the generated section contains no explicit I5S labels and returns five Opportunity/Risk pairs. This is a display/export clean-up step and does not add new manufacturing evidence.
+
+## v21 deterministic display/export formatting
+
+The v21 package rebuilds the visible/exported raw Supply Chain Configuration & Action Plan from the frozen knowledge base for all three benchmark typologies: Product Transfer, Technology Transfer, and Facility Design. This makes the copied benchmark evidence independent from LLM line spacing. It also renders Improvement Opportunities & Risks from typology-specific I5S templates in the fixed order Social, Sustainable, Sensing, Smart, Safe.

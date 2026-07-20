@@ -24,7 +24,7 @@ This repository contains a Streamlit prototype for a bounded LLM-based decision-
 
 ## Current package notes
 
-This GitHub package keeps secrets out of the repository. It also includes stricter Facility Design prompting and final-output cleaning to prevent internal verifier wording from appearing in generated recommendations.
+This GitHub package keeps secrets out of the repository. It also includes deterministic final-output formatting for Product Transfer, Technology Transfer, and Facility Design, plus final-output cleaning to prevent internal verifier wording from appearing in generated recommendations.
 
 ## Knowledge base
 
@@ -102,3 +102,13 @@ The raw Supply Chain Configuration & Action Plan is rendered with preserved line
 - Adds a deterministic guard for `Improvement Opportunities & Risks`: if the LLM returns unlabeled `Opportunity/Risk` pairs, the app replaces them with a typology-specific I5S section labelled `Social`, `Sustainable`, `Sensing`, `Smart`, and `Safe`.
 - Keeps `Digital/AI Next Steps` as a plain action list instead of forcing I5S labels onto that section.
 - Updates the cache revision so deployed Streamlit results are regenerated rather than reusing previous v19 cached outputs.
+
+
+## v21 deterministic formatting update
+
+- Product Transfer, Technology Transfer, and Facility Design raw Supply Chain Configuration & Action Plan sections are now rebuilt from the frozen knowledge base before display/export.
+- Every selected LCE stage uses the same benchmark-ready block format: `Action`, `Key information/methods`, `Representative methods/tools`, `Deliverables/tollgates`, and `Evaluation`.
+- `Improvement Opportunities & Risks` is now rendered deterministically in the fixed I5S order: Social, Sustainable, Sensing, Smart, Safe.
+- The section no longer depends on LLM indentation or unlabeled `Opportunity/Risk` pairs.
+- Product Transfer expected-rationale wording no longer refers to Technology Transfer.
+- Cache revision updated to v21.
