@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v17_clean_raw_section_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v18_tt_rationales_and_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -372,29 +372,26 @@ def build_kb_action_plan_section(system_type: str, selected_stages: list) -> str
         information = _clean_fragment(e.get("engineering_synthesis_information") or "")
         evaluation = _clean_fragment(e.get("engineering_evaluation_performance") or "")
 
-        if system_type == "Facility Design":
-            # Facility Design must not collapse into generic deliverables. Keep capacity,
-            # layout, material-flow, utilities, commissioning and reconfiguration logic visible.
-            # The raw section is intentionally multi-line so Streamlit output and copied text
-            # remain readable stage by stage. Each stage header is kept on its own line.
-            line = (
-                f"{stage}:\n"
-                f"  Action: {analysis}.\n"
-                f"  Key information/methods: {information}.\n"
-                f"  Representative methods/tools: {tools}.\n"
-                f"  Deliverables/tollgates: {deliverables}.\n"
-                f"  Evaluation: {evaluation}."
-            )
-        else:
-            line = (
-                f"{stage}:\n"
-                f"  Action: {analysis}.\n"
-                f"  Deliverables/tollgates: {deliverables}.\n"
-                f"  Representative methods/tools: {tools}.\n"
-                f"  Evaluation: {evaluation}."
-            )
-        # Clean spaces within each line without collapsing line breaks.
-        line = "\n".join(re.sub(r"[ \t]+", " ", ln).strip() for ln in line.splitlines())
+        # The raw section is intentionally multi-line so Streamlit output, saved TXT
+        # outputs, and benchmark evidence remain readable stage by stage. Each stage
+        # receives the same detailed structure across typologies, including Technology
+        # Transfer, so it does not collapse into short deliverable-only lines.
+        line = (
+            f"{stage}:\n"
+            f"  Action: {analysis}.\n"
+            f"  Key information/methods: {information}.\n"
+            f"  Representative methods/tools: {tools}.\n"
+            f"  Deliverables/tollgates: {deliverables}.\n"
+            f"  Evaluation: {evaluation}."
+        )
+        # Clean spaces inside lines while preserving useful indentation and line breaks.
+        normalized_lines = []
+        for ln in line.splitlines():
+            ln = re.sub(r"[ \t]+", " ", ln).rstrip()
+            if re.match(r"^(Action|Key information/methods|Representative methods/tools|Deliverables/tollgates|Evaluation):", ln):
+                ln = "  " + ln
+            normalized_lines.append(ln)
+        line = "\n".join(normalized_lines)
         line = re.sub(r"\.\.", ".", line).strip()
         lines.append(line)
     return "\n\n".join(lines)
@@ -420,11 +417,12 @@ def _facility_raw_plan_is_too_generic(plan_text: str) -> bool:
 def enrich_raw_plan_from_kb_if_needed(plan_text: str, system_type: str, selected_stages: list) -> str:
     """Repair the raw action-plan section using the frozen KB when needed.
 
-    Facility Design is always rewritten with a KB-grounded action-plan section so
-    the raw plan remains as detailed as the Stage Views. This avoids short generic
-    lines such as only "detailed layout drawing" or "reuse/decommissioning audit".
+    Facility Design and Technology Transfer are rewritten with a KB-grounded
+    action-plan section so the raw plan remains as detailed as the Stage Views.
+    This avoids short generic lines such as only "detailed layout drawing",
+    "equipment shortlist", or "pilot-validation package".
     """
-    if system_type != "Facility Design":
+    if system_type not in {"Facility Design", "Technology Transfer"}:
         return plan_text
     detailed = build_kb_action_plan_section(system_type, selected_stages)
     if not detailed:
@@ -453,6 +451,9 @@ def normalize_i5s_order(section_text: str) -> str:
             continue
         line = re.sub(r"\bto raise human[-\s]?factors maturity\b", "to strengthen human-factors integration", line, flags=re.IGNORECASE)
         line = re.sub(r"\bgoverned by human approval of sustainability criteria\b", "subject to human review of sustainability criteria", line, flags=re.IGNORECASE)
+        line = re.sub(r"risk:\s*human[-\s]?review delay could postpone deployment", "risk: deployment may be delayed if safety-review evidence is incomplete", line, flags=re.IGNORECASE)
+        line = re.sub(r"risk if smart tools are used with human review and approval leading to uncontrolled changes", "risk if smart tools are used without human review and approval, leading to uncontrolled changes", line, flags=re.IGNORECASE)
+        line = re.sub(r"risk:\s*human review required", "risk: incomplete validation evidence may delay approval", line, flags=re.IGNORECASE)
         m = re.match(r"^(Social|Sustainable|Sensing|Smart|Safe)\s*:\s*(.*)$", line, flags=re.IGNORECASE)
         if m:
             dim = next(d for d in order if d.lower() == m.group(1).lower())
@@ -488,6 +489,11 @@ def normalize_supply_chain_raw_format(section_text: str, selected_stages: list) 
         text = re.sub(rf"(?im)^({alias})\s*:\s*(?=\S)", stage_label + ":\n  ", text)
     for label in ["Action", "Key information/methods", "Representative methods/tools", "Deliverables/tollgates", "Evaluation"]:
         text = re.sub(rf"\s+(?={re.escape(label)}\s*:)", "\n  ", text)
+    # Enforce consistent indentation on every field line, even when the LLM or
+    # previous normalisation produced the label at the beginning of a line.
+    text = re.sub(r"(?m)^(Action|Key information/methods|Representative methods/tools|Deliverables/tollgates|Evaluation)\s*:", r"  \1:", text)
+    # Ensure every stage header starts after a blank line.
+    text = re.sub(r"(?m)([^\n])\n(Basic Development|Advanced Development|Launching|End[-‑]of[-‑]Life)\s*:", r"\1\n\n\2:", text)
     text = re.sub(r"\.\.", ".", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -622,6 +628,10 @@ def clean_internal_verifier_leaks(plan_text: str) -> str:
     # Remove non-parenthetical maturity explanations if they appear after a semicolon or comma.
     cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?L[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(?:;|,)\s*(?:current\s+)?Level\s*[0-4]\s+(?:lacks|uses|relies on|has)[^.;\n]*", "", cleaned, flags=re.IGNORECASE)
+
+    # Human review is a governance control, not a risk source. Correct awkward model phrasing.
+    cleaned = re.sub(r"human[-\s]?review delay could postpone deployment", "deployment may be delayed if safety-review evidence is incomplete", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"risk if smart tools are used with human review and approval leading to uncontrolled changes", "risk if smart tools are used without human review and approval, leading to uncontrolled changes", cleaned, flags=re.IGNORECASE)
 
     # Normalize accidental 5S dimension labels. The construct uses "Safe", not "Safety".
     # Keep "safety" as a normal noun inside sentences, but correct label-like uses.
@@ -1233,11 +1243,13 @@ def _pick_reasons(plan_text: str, dim: str) -> list:
 
     rules = {
         "Social": [
-            ([r"ergonom", r"human[-\s]?factors?"],
-             "Ergonomic and human-factors actions support safer, more human-centred work design."),
+            ([r"cross[-\s]?functional", r"operator[-\s]?led", r"SOP refinement", r"participatory"],
+             "Cross-functional review sessions and operator-led SOP refinement support human-centred technology transfer."),
+            ([r"ergonom", r"human[-\s]?factors?", r"human movement"],
+             "Ergonomic assessments and human movement paths support safer, more human-centred layout design."),
             ([r"training", r"LMS", r"workforce", r"operator"],
              "Workforce training actions support skill development and more consistent shop-floor practice."),
-            ([r"co[-\s]?creation", r"participatory", r"worker feedback", r"collaborative"],
+            ([r"co[-\s]?creation", r"worker feedback", r"collaborative"],
              "Participatory input supports worker engagement during requirements and launch activities."),
         ],
         "Sustainable": [
@@ -1267,9 +1279,11 @@ def _pick_reasons(plan_text: str, dim: str) -> list:
         "Safe": [
             ([r"ISO\s?45001", r"occupational", r"health"],
              "Occupational health and safety actions support a more formal safe-work system."),
+            ([r"commissioning safety", r"safety sign[-\s]?off", r"safety validation", r"safety check", r"site acceptance"],
+             "Commissioning safety checks and sign-off support formal safety validation before launch."),
             ([r"IEC\s?61508", r"IEC\s?62061", r"ISO\s?13849", r"functional safety"],
              "Functional-safety standards support risk control for equipment and automation."),
-            ([r"FMEA", r"HAZOP", r"LOPA", r"LOTO", r"risk"],
+            ([r"FMEA", r"HAZOP", r"LOPA", r"LOTO", r"risk assessment", r"risk review"],
              "FMEA/HAZOP/LOPA or LOTO actions support hazard identification and mitigation."),
             ([r"IEC\s?62443", r"NIST", r"cyber", r"OT security"],
              "Cybersecurity controls support safer cyber-physical manufacturing operations."),
@@ -1370,8 +1384,14 @@ def _validate_5s_rationale_payload(data: dict, fallback: dict) -> dict | None:
         if not isinstance(reasons, list):
             return None
         reasons = [_clean_why_text(r) for r in reasons if _clean_why_text(r)]
+        fallback_reasons = fallback.get(dim, {}).get("why", []) or []
+        fallback_reasons = [_clean_why_text(r) for r in fallback_reasons if _clean_why_text(r)]
         if not reasons:
             return None
+        # Do not let optional LLM polishing make the rationale table weaker.
+        # When deterministic rules found two grounded reasons, keep two reasons.
+        if len(reasons) < min(2, len(fallback_reasons)):
+            reasons = fallback_reasons
         cur = int(fallback[dim]["current"])
         exp = int(fallback[dim]["expected"])
         cleaned[dim] = {"current": cur, "expected": exp, "why": reasons[:2]}
@@ -1486,6 +1506,9 @@ def plan_with_llm(state: AgentState, evidence: str) -> str:
         "- For Technology Transfer, prioritize technical specifications; technical-economic benchmarking; technology/equipment selection; supplier or equipment shortlist; pilot-line or joint-development trials; feasibility evidence; process plans; SOPs; control documentation; installation qualification; first-article inspection; ramp-up; MES/ERP data collection; digital twin support for simulation and lifecycle learning; and lessons learned.\n"
         "- For Technology Transfer, do not reduce the output to generic technology selection. The plan should explicitly show the pathway: technical specifications -> benchmarking -> equipment/technology selection -> pilot-line or joint-development trials -> process plan and SOPs -> installation qualification and first-article inspection -> human-approved digital-twin learning.\n"
         "- For Technology Transfer, any AI or digital-twin recommendation must be reviewed by engineers before changing SOPs, control plans, equipment parameters, MES/ERP records, or operational settings.\n"
+        "- For Technology Transfer raw action-plan lines, use the same detailed format for every LCE stage: Action, Key information/methods, Representative methods/tools, Deliverables/tollgates, and Evaluation.\n"
+        "- For Technology Transfer Safe actions, explicitly include risk reviews, FMEA/HAZOP or LOTO planning, commissioning safety checks, and incomplete validation evidence as the risk, rather than treating human review as a delay.\n"
+        "- For Technology Transfer Social actions, explicitly connect cross-functional review sessions, operator-led SOP refinement, and training to human-centred technology transfer.\n"
         "- For Facility Design, the main logic must be facility-centred: product/process requirements, demand and capacity assumptions, equipment/system selection, utilities, shop-floor layout, material flow, storage and buffer areas, human movement, safety zones, installation, commissioning, site acceptance, ramp-up evaluation, and future reconfiguration.\n"
         "- For Facility Design, make-or-buy analysis and supplier networks are supporting decisions; they must not replace the facility requirements brief, capacity model, layout, material-flow plan, or commissioning logic.\n"
         "- For Facility Design, cyber-by-design, sensing infrastructure, digital traceability, and AI analytics are supporting elements; they must not become the main Advanced Development activity.\n"

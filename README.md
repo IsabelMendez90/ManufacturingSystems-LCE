@@ -79,3 +79,12 @@ The raw Supply Chain Configuration & Action Plan is rendered with preserved line
 - Facility Design raw plans use a stage header followed by indented `Action`, `Key information/methods`, `Representative methods/tools`, `Deliverables/tollgates`, and `Evaluation` lines.
 - I5S narrative sections are normalised to the canonical order: Social, Sustainable, Sensing, Smart, Safe.
 - Markdown bullets/bold are removed from raw narrative sections to make copied benchmark outputs cleaner as `.txt` files.
+
+## v18 Technology Transfer and rationale update
+
+- Technology Transfer raw plans are rebuilt from the frozen knowledge base using the same detailed stage format as Facility Design: `Action`, `Key information/methods`, `Representative methods/tools`, `Deliverables/tollgates`, and `Evaluation`.
+- Safe risk wording is corrected so human review is treated as a governance control, not as a deployment risk.
+- Technology Transfer Safe actions are prompted to include risk reviews, FMEA/HAZOP or LOTO planning, commissioning safety checks, and incomplete validation evidence as the relevant risk.
+- Social rationales distinguish human-centred technology transfer, ergonomic layout design, and workforce training instead of over-linking human movement paths to skill development.
+- Expected 5S rationale polishing cannot reduce the number of deterministic evidence-grounded reasons when two reasons are available.
+- Raw stage formatting and I5S order normalisation from v17 are retained.
