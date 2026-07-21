@@ -33,3 +33,8 @@ The v19 package adds a final formatting pass for I5S narrative sections. The can
 ## v21 deterministic display/export formatting
 
 The v21 package rebuilds the visible/exported raw Supply Chain Configuration & Action Plan from the frozen knowledge base for all three benchmark typologies: Product Transfer, Technology Transfer, and Facility Design. This makes the copied benchmark evidence independent from LLM line spacing. It also renders Improvement Opportunities & Risks from typology-specific I5S templates in the fixed order Social, Sustainable, Sensing, Smart, Safe.
+
+
+## v22 preformatted display/export note
+
+The v22 package displays raw benchmark sections as preformatted text in Streamlit. This is a rendering control only: it does not change the benchmark logic or add evidence. The purpose is to preserve indentation for copied outputs, especially the five-line structure within each LCE stage and the Opportunity/Risk lines in the I5S section.

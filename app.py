@@ -72,7 +72,7 @@ API_KEY = st.secrets["OPENROUTER_API_KEY"]
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 
 TXT_LIMIT = 12000  # keep LLM prompts bounded
-CACHE_REVISION = f"benchmark_clean_v21_deterministic_all_typologies_format__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
+CACHE_REVISION = f"benchmark_clean_v22_preformatted_raw_sections__{KNOWLEDGE_BASE_ID}_{KNOWLEDGE_BASE_VERSION}"
 ENABLE_LLM_RATIONALE_POLISH = True
 
 # ------------------------ Evaluation metrics (optional) ------------------------
@@ -677,7 +677,7 @@ def normalize_raw_sections_for_display(plan_text: str, system_type: str, selecte
         return ""
     sc = parse_section(plan_text, "Supply Chain Configuration & Action Plan")
     if sc:
-        # v21: for all three benchmark typologies, rebuild the visible/exported
+        # v22: for all three benchmark typologies, rebuild the visible/exported
         # raw action plan from the frozen KB instead of relying on LLM spacing.
         # This guarantees uniform stage blocks and field indentation.
         kb_sc = build_kb_action_plan_section(system_type, selected_stages)
@@ -687,7 +687,7 @@ def normalize_raw_sections_for_display(plan_text: str, system_type: str, selecte
             "Supply Chain Configuration & Action Plan",
             final_sc,
         )
-    # v21: Improvement Opportunities are rendered deterministically in canonical
+    # v22: Improvement Opportunities are rendered deterministically in canonical
     # I5S order for all benchmark typologies. This prevents unlabeled
     # Opportunity/Risk pairs and inconsistent indentation after LLM cleanup.
     body = parse_section(plan_text, "Improvement Opportunities & Risks")
@@ -1914,10 +1914,14 @@ def agent_run(objective, system_type, industry, role, selected_stages, five_s_le
 
 
 def render_raw_section_box(text: str):
-    """Render generated raw sections with preserved line breaks instead of one long paragraph."""
+    """Render raw benchmark sections as preformatted text.
+
+    Streamlit/Markdown can collapse leading spaces when users copy the result.
+    st.code preserves newlines and indentation, so the deterministic stage blocks
+    remain readable in both the app and copied benchmark evidence.
+    """
     value = (text or "—").strip() or "—"
-    escaped = html.escape(value)
-    st.markdown(f"<div class='raw-section-box'>{escaped}</div>", unsafe_allow_html=True)
+    st.code(value, language="text")
 
 # ------------------------ UI ------------------------
 

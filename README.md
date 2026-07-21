@@ -112,3 +112,11 @@ The raw Supply Chain Configuration & Action Plan is rendered with preserved line
 - The section no longer depends on LLM indentation or unlabeled `Opportunity/Risk` pairs.
 - Product Transfer expected-rationale wording no longer refers to Technology Transfer.
 - Cache revision updated to v21.
+
+
+## v22 preformatted raw-section display update
+
+- Renders raw benchmark sections with `st.code(..., language="text")` so copied outputs preserve newlines and indentation.
+- Keeps deterministic raw Supply Chain Configuration & Action Plan reconstruction for Product Transfer, Technology Transfer, and Facility Design.
+- Keeps deterministic Improvement Opportunities & Risks in the fixed I5S order: Social, Sustainable, Sensing, Smart, Safe.
+- Cache revision updated to v22 to avoid reusing older v21 formatted outputs.
